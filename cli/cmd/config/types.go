@@ -1,5 +1,7 @@
 package config
 
+import "fmt"
+
 // Config file constants (searched in this order)
 var (
 	// SupportedLlamaFarmConfigFiles lists all supported llamafarm config file names
@@ -19,7 +21,8 @@ type LlamaFarmConfig struct {
 	Prompts   []Prompt  `yaml:"prompts,omitempty" toml:"prompts,omitempty"`
 	RAG       RAGConfig `yaml:"rag,omitempty" toml:"rag,omitempty"`
 	Datasets  []Dataset `yaml:"datasets,omitempty" toml:"datasets,omitempty"`
-	Models    []Model   `yaml:"models,omitempty" toml:"models,omitempty"`
+	Runtime   *RuntimeConfig     `yaml:"runtime,omitempty" toml:"runtime,omitempty"`
+	Models    []ModelDefinition  `yaml:"models,omitempty" toml:"models,omitempty"`
 }
 
 // Dataset represents a dataset configuration
@@ -87,8 +90,109 @@ type DefaultsConfig struct {
 	RetrievalStrategy string `yaml:"retrieval_strategy" toml:"retrieval_strategy"`
 }
 
-// Model represents a model configuration
-type Model struct {
-	Provider string `yaml:"provider" toml:"provider"`
-	Model    string `yaml:"model" toml:"model"`
+// RuntimeConfig represents the legacy single-runtime configuration
+type RuntimeConfig struct {
+	Provider          string                 `yaml:"provider" toml:"provider"`
+	Model             string                 `yaml:"model" toml:"model"`
+	BaseURL           string                 `yaml:"base_url,omitempty" toml:"base_url,omitempty"`
+	APIKey            string                 `yaml:"api_key,omitempty" toml:"api_key,omitempty"`
+	InstructorMode    string                 `yaml:"instructor_mode,omitempty" toml:"instructor_mode,omitempty"`
+	AgentHandler      string                 `yaml:"agent_handler,omitempty" toml:"agent_handler,omitempty"`
+	ModelAPIParameters map[string]interface{} `yaml:"model_api_parameters,omitempty" toml:"model_api_parameters,omitempty"`
+}
+
+// ModelDefinition represents a configured model entry
+type ModelDefinition struct {
+	Alias             string                 `yaml:"alias" toml:"alias"`
+	DisplayName       string                 `yaml:"display_name,omitempty" toml:"display_name,omitempty"`
+	Description       string                 `yaml:"description,omitempty" toml:"description,omitempty"`
+	Provider          string                 `yaml:"provider" toml:"provider"`
+	Model             string                 `yaml:"model" toml:"model"`
+	BaseURL           string                 `yaml:"base_url,omitempty" toml:"base_url,omitempty"`
+	APIKey            string                 `yaml:"api_key,omitempty" toml:"api_key,omitempty"`
+	InstructorMode    string                 `yaml:"instructor_mode,omitempty" toml:"instructor_mode,omitempty"`
+	AgentHandler      string                 `yaml:"agent_handler,omitempty" toml:"agent_handler,omitempty"`
+	Default           bool                   `yaml:"default,omitempty" toml:"default,omitempty"`
+	ModelAPIParameters map[string]interface{} `yaml:"model_api_parameters,omitempty" toml:"model_api_parameters,omitempty"`
+}
+
+// EffectiveModels returns the configured models, falling back to the legacy runtime when necessary.
+func (c *LlamaFarmConfig) EffectiveModels() []ModelDefinition {
+	models := make([]ModelDefinition, 0, len(c.Models)+1)
+	for _, m := range c.Models {
+		models = append(models, m)
+	}
+	if c.Runtime != nil {
+		alias := "runtime"
+		if len(models) == 0 {
+			alias = "default"
+		}
+		runtimeModel := ModelDefinition{
+			Alias:             alias,
+			Provider:          c.Runtime.Provider,
+			Model:             c.Runtime.Model,
+			BaseURL:           c.Runtime.BaseURL,
+			APIKey:            c.Runtime.APIKey,
+			InstructorMode:    c.Runtime.InstructorMode,
+			AgentHandler:      c.Runtime.AgentHandler,
+			Default:           len(models) == 0,
+			ModelAPIParameters: copyMap(c.Runtime.ModelAPIParameters),
+		}
+		models = append(models, runtimeModel)
+	}
+	if len(models) > 0 && !hasDefaultModel(models) {
+		models[0].Default = true
+	}
+	return models
+}
+
+// ResolveModel returns the model definition matching the alias (or provider model name). Empty alias resolves to the default model.
+func (c *LlamaFarmConfig) ResolveModel(alias string) (*ModelDefinition, error) {
+	models := c.EffectiveModels()
+	if len(models) == 0 {
+		return nil, fmt.Errorf("no models configured")
+	}
+	if alias != "" {
+		for i := range models {
+			if models[i].Alias == alias || models[i].Model == alias {
+				return &models[i], nil
+			}
+		}
+		return nil, fmt.Errorf("unknown model alias '%s'", alias)
+	}
+	for i := range models {
+		if models[i].Default {
+			return &models[i], nil
+		}
+	}
+	return &models[0], nil
+}
+
+// DefaultModelAlias returns the alias of the default model.
+func (c *LlamaFarmConfig) DefaultModelAlias() (string, error) {
+	model, err := c.ResolveModel("")
+	if err != nil {
+		return "", err
+	}
+	return model.Alias, nil
+}
+
+func hasDefaultModel(models []ModelDefinition) bool {
+	for _, m := range models {
+		if m.Default {
+			return true
+		}
+	}
+	return false
+}
+
+func copyMap(src map[string]interface{}) map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]interface{}, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }

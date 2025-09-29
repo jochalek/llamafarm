@@ -7,7 +7,6 @@ required:
   - version
   - name
   - namespace
-  - runtime
 properties:
   version:
     type: string
@@ -102,3 +101,10 @@ properties:
       model_api_parameters:
         description: Additional parameters passed to the API provider
         additionalProperties: true
+
+  models:
+    $ref: "../models/schema.yaml"
+
+anyOf:
+  - required: [runtime]
+  - required: [models]

@@ -20,7 +20,7 @@ from config.datamodel import (  # noqa: E402
     LlamaFarmConfig,
     Prompt,
     Provider,
-    Runtime,
+    ResolvedModel,
 )
 
 from core.logging import FastAPIStructLogger  # noqa: E402

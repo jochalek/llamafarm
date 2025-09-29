@@ -82,6 +82,7 @@ type ChatSessionContext struct {
 	// context is persisted; for dev sessions they map to the user's project.
 	SessionNamespace string
 	SessionProject   string
+	ModelAlias       string
 	Temperature      float64
 	MaxTokens        int
 	Streaming        bool
@@ -213,6 +214,10 @@ func startChatStream(messages []ChatMessage, ctx *ChatSessionContext) (<-chan st
 			}
 		}
 		request := ChatRequest{Messages: filteredMessages, Stream: &streamTrue}
+		if ctx.ModelAlias != "" {
+			modelAlias := ctx.ModelAlias
+			request.Model = &modelAlias
+		}
 
 		// Add RAG parameters if enabled
 		if ctx.RAGEnabled {

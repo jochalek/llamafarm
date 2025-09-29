@@ -17,6 +17,7 @@ var (
 	runRAGTopK           int
 	runNoRAG             bool
 	runRAGScoreThreshold float64
+	runModelAlias        string
 )
 
 // runCmd represents the `lf run` command
@@ -133,6 +134,17 @@ Examples:
 		ns = serverCfg.Namespace
 		proj = serverCfg.Project
 
+		lfConfig, err := config.LoadConfig(cwd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+			os.Exit(1)
+		}
+		modelDef, err := lfConfig.ResolveModel(runModelAlias)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error resolving model: %v\n", err)
+			os.Exit(1)
+		}
+
 		// Ensure server is up (auto-start locally if needed)
 		ensureServerAvailable(serverURL, true)
 
@@ -144,6 +156,7 @@ Examples:
 			SessionMode:      SessionModeStateless,
 			SessionNamespace: ns,
 			SessionProject:   proj,
+			ModelAlias:       modelDef.Alias,
 			Temperature:      temperature,
 			MaxTokens:        maxTokens,
 			HTTPClient:       getHTTPClient(),
@@ -177,6 +190,7 @@ func init() {
 	runCmd.Flags().StringVar(&runRetrievalStrategy, "retrieval-strategy", "", "Retrieval strategy to use (default: from database config)")
 	runCmd.Flags().IntVar(&runRAGTopK, "rag-top-k", 5, "Number of RAG results to retrieve")
 	runCmd.Flags().Float64Var(&runRAGScoreThreshold, "rag-score-threshold", 0.0, "Minimum score threshold for RAG results")
+	runCmd.Flags().StringVar(&runModelAlias, "model", "", "Model alias defined in configuration (defaults to config default)")
 
 	rootCmd.AddCommand(runCmd)
 }
