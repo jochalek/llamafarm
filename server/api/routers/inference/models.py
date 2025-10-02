@@ -5,10 +5,26 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+# OpenAI vision content types
+class TextContent(BaseModel):
+    type: Literal["text"]
+    text: str
+
+
+class ImageURL(BaseModel):
+    url: str
+    detail: str | None = None
+
+
+class ImageURLContent(BaseModel):
+    type: Literal["image_url"]
+    image_url: ImageURL
+
+
 # OpenAI-compatible chat message
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant"]
-    content: str
+    content: str | list[TextContent | ImageURLContent]
 
 
 # OpenAI-compatible chat completion request

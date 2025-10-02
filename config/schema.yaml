@@ -116,12 +116,52 @@ properties:
               description: "Instructor mode to use for structured output (e.g., tools, json, md_json)"
             prompt_format:
               type: ["string", "null"]
-              enum: [structured, unstructured, null]
-              description: "Prompt formatting pipeline (structured uses Instructor; unstructured sends freeform prompts)"
+              enum: [structured, unstructured, image, null]
+              description: "Prompt formatting pipeline (structured uses Instructor; unstructured sends freeform prompts; image for vision/multimodal)"
             model_api_parameters:
               type: ["object", "null"]
               description: "Additional parameters passed to the API provider"
               additionalProperties: true
+            vision:
+              type: ["boolean", "null"]
+              default: false
+              description: "Whether this model supports vision/image inputs"
+            mmproj:
+              type: ["string", "null"]
+              description: "Path to multimodal projector file (for llamacpp vision models)"
+            vision_config:
+              type: ["object", "null"]
+              description: "Vision-specific configuration for image processing"
+              properties:
+                detail:
+                  type: ["string", "null"]
+                  enum: [low, high, auto, null]
+                  default: low
+                  description: "Image detail level (low=512px max/faster, high=2048px max/slower, auto=adaptive)"
+                max_tokens:
+                  type: ["integer", "null"]
+                  default: 512
+                  description: "Maximum tokens for vision responses"
+                temperature:
+                  type: ["number", "null"]
+                  default: 0.1
+                  description: "Temperature for vision model (lower=more focused)"
+                timeout:
+                  type: ["number", "null"]
+                  default: 300
+                  description: "Request timeout in seconds (vision models can be slow, 300s = 5 minutes)"
+                max_image_size_kb:
+                  type: ["integer", "null"]
+                  default: 500
+                  description: "Warn if image exceeds this size in KB"
+                resize_images:
+                  type: ["boolean", "null"]
+                  default: false
+                  description: "Automatically resize images (future feature)"
+                max_dimension:
+                  type: ["integer", "null"]
+                  default: 512
+                  description: "Maximum width/height when resizing (future feature)"
             lemonade:
               type: ["object", "null"]
               description: "Lemonade-specific configuration"

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"llamafarm-cli/cmd/config"
@@ -18,6 +19,8 @@ var (
 	runNoRAG             bool
 	runRAGScoreThreshold float64
 	runModel             string
+	runImagePath         string
+	runImageDir          string
 )
 
 // chatCmd represents the `lf chat` command
@@ -52,7 +55,13 @@ Examples:
   lf chat --no-rag "What is machine learning?"
 
   # Select specific model
-  lf chat --model fast "What is machine learning?"`,
+  lf chat --model fast "What is machine learning?"
+
+  # Use vision model with an image
+  lf chat --model vision --image ./photo.jpg "What's in this image?"
+
+  # Use vision model with multiple images from a directory
+  lf chat --model vision --image-dir ./screenshots "Compare these UI designs"`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		// Valid forms:
 		// 1) chat <ns>/<proj> <input>
@@ -160,7 +169,48 @@ Examples:
 			RAGScoreThreshold:    runRAGScoreThreshold,
 		}
 
-		messages := []ChatMessage{{Role: "user", Content: input}}
+		// Collect image paths
+		var imagePaths []string
+		if runImagePath != "" {
+			imagePaths = append(imagePaths, runImagePath)
+		}
+		if runImageDir != "" {
+			// Read all image files from directory
+			entries, err := os.ReadDir(runImageDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error reading image directory '%s': %v\n", runImageDir, err)
+				os.Exit(1)
+			}
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					ext := strings.ToLower(filepath.Ext(entry.Name()))
+					if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" {
+						imagePaths = append(imagePaths, filepath.Join(runImageDir, entry.Name()))
+					}
+				}
+			}
+		}
+
+		// Create message (vision if images present)
+		var userMsg ChatMessage
+		if len(imagePaths) > 0 {
+			// Limit to 10 images per OpenAI spec
+			if len(imagePaths) > 10 {
+				fmt.Fprintf(os.Stderr, "Warning: More than 10 images provided, using first 10\n")
+				imagePaths = imagePaths[:10]
+			}
+
+			visionMsg, err := createVisionMessage(input, imagePaths)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error creating vision message: %v\n", err)
+				os.Exit(1)
+			}
+			userMsg = visionMsg
+		} else {
+			userMsg = ChatMessage{Role: "user", Content: input}
+		}
+
+		messages := []ChatMessage{userMsg}
 		resp, err := sendChatRequest(messages, ctx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -183,6 +233,10 @@ func init() {
 	chatCmd.Flags().StringVar(&runRetrievalStrategy, "retrieval-strategy", "", "Retrieval strategy to use (default: from database config)")
 	chatCmd.Flags().IntVar(&runRAGTopK, "rag-top-k", 5, "Number of RAG results to retrieve")
 	chatCmd.Flags().Float64Var(&runRAGScoreThreshold, "rag-score-threshold", 0.0, "Minimum score threshold for RAG results")
+
+	// Vision support flags
+	chatCmd.Flags().StringVar(&runImagePath, "image", "", "Path to an image file for vision models (jpg, png, gif, webp)")
+	chatCmd.Flags().StringVar(&runImageDir, "image-dir", "", "Path to directory containing images (processes all images, max 10)")
 
 	rootCmd.AddCommand(chatCmd)
 }

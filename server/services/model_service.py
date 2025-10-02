@@ -105,7 +105,7 @@ class ModelService:
             project_config: Project configuration
 
         Returns:
-            List of model metadata dicts with id, description, provider, model, is_default
+            List of model metadata dicts with id, description, provider, model, is_default, vision
         """
         if not project_config.runtime.models:
             return []
@@ -121,6 +121,7 @@ class ModelService:
                     "provider": model_config.provider.value if model_config.provider else "",  # type: ignore
                     "model": model_config.model,  # type: ignore
                     "is_default": model_config.name == default_model_name,  # type: ignore
+                    "vision": getattr(model_config, "vision", False),  # type: ignore
                 }
             )
 

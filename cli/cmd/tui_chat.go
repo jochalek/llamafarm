@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -161,6 +162,7 @@ type ModelInfo struct {
 	Provider    string
 	Model       string
 	IsDefault   bool
+	Vision      bool // Whether this model supports vision/image inputs
 }
 
 type chatModel struct {
@@ -191,6 +193,8 @@ type chatModel struct {
 	// Model switching state
 	availableModels []ModelInfo
 	currentModel    string
+	// Vision support
+	imagePaths []string // Paths to images for next message (vision models only)
 }
 
 type (
@@ -512,6 +516,45 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.textarea, tiCmd = m.textarea.Update(msg)
 	m.viewport, vpCmd = m.viewport.Update(msg)
 
+	// Detect drag-and-drop file paths (terminals paste file paths when dragged)
+	// Check if textarea value looks like a file path and auto-handle it
+	if m.currentMode == ModeProject {
+		currentValue := m.textarea.Value()
+		modelInfo := m.getModelInfo(m.currentModel)
+
+		// Detect if the pasted/typed text is a file path
+		if modelInfo.Vision && strings.TrimSpace(currentValue) != "" {
+			trimmed := strings.TrimSpace(currentValue)
+			// Check for common file path patterns
+			if (strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "~") || strings.HasPrefix(trimmed, "./")) &&
+				!strings.Contains(trimmed, " ") {
+				// Check if it's an image file
+				ext := strings.ToLower(filepath.Ext(trimmed))
+				if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" {
+					// Check if file exists
+					checkPath := trimmed
+					if strings.HasPrefix(checkPath, "~") {
+						home, _ := os.UserHomeDir()
+						checkPath = filepath.Join(home, checkPath[1:])
+					}
+					if _, err := os.Stat(checkPath); err == nil {
+						// Valid image file - auto-add it
+						if len(m.imagePaths) < 10 {
+							m.imagePaths = append(m.imagePaths, checkPath)
+							m.messages = append(m.messages, ChatMessage{
+								Role:    "client",
+								Content: fmt.Sprintf("📷 Auto-detected and added image: %s (%d/10)", filepath.Base(checkPath), len(m.imagePaths)),
+							})
+							m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(renderChatContent(m)))
+							m.viewport.GotoBottom()
+							m.textarea.SetValue("") // Clear the path from input
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Forward all messages to the spinner so it processes its own TickMsgs
 	m.spin, cmd = m.spin.Update(msg)
 
@@ -597,16 +640,77 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 
+			// Pre-process: extract /image commands from anywhere in the message
+			if m.currentMode == ModeProject && strings.Contains(msg, "/image ") {
+				modelInfo := m.getModelInfo(m.currentModel)
+				if modelInfo.Vision {
+					// Extract and process /image commands
+					parts := strings.Split(msg, "/image ")
+					for i := 1; i < len(parts); i++ {
+						// Extract the path (everything until space or end of string)
+						pathPart := strings.TrimSpace(parts[i])
+						var imagePath string
+						if strings.HasPrefix(pathPart, "'") || strings.HasPrefix(pathPart, "\"") {
+							// Quoted path
+							quote := pathPart[0:1]
+							endIdx := strings.Index(pathPart[1:], quote)
+							if endIdx > 0 {
+								imagePath = pathPart[1 : endIdx+1]
+								parts[i] = strings.TrimSpace(pathPart[endIdx+2:])
+							}
+						} else {
+							// Unquoted path (until space)
+							fields := strings.Fields(pathPart)
+							if len(fields) > 0 {
+								imagePath = fields[0]
+								parts[i] = strings.TrimSpace(strings.Join(fields[1:], " "))
+							}
+						}
+
+						if imagePath != "" && len(m.imagePaths) < 10 {
+							// Expand ~ to home directory
+							if strings.HasPrefix(imagePath, "~") {
+								home, _ := os.UserHomeDir()
+								imagePath = filepath.Join(home, imagePath[1:])
+							}
+							// Check if file exists
+							if _, err := os.Stat(imagePath); err == nil {
+								m.imagePaths = append(m.imagePaths, imagePath)
+								m.messages = append(m.messages, ChatMessage{
+									Role:    "client",
+									Content: fmt.Sprintf("📷 Added image: %s (%d/10)", filepath.Base(imagePath), len(m.imagePaths)),
+								})
+							}
+						}
+					}
+					// Reconstruct message without /image commands
+					msg = strings.TrimSpace(strings.Join(parts, " "))
+					m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(renderChatContent(m)))
+					m.viewport.GotoBottom()
+
+					// If message is now empty (was only /image commands), clear textarea and break
+					if msg == "" {
+						m.textarea.SetValue("")
+						break
+					}
+				}
+			}
+
 			lower := strings.ToLower(msg)
-			// Slash commands
+			// Slash commands (only if message STARTS with /)
 			if strings.HasPrefix(lower, "/") {
 				fields := strings.Fields(lower)
 				cmd := fields[0]
 				switch cmd {
 				case "/help":
-					helpText := "Commands: /help, /switch, /mode [dev|project], /model [name], /clear, /launch designer, /exit\n"
+					helpText := "Commands: /help, /switch, /mode [dev|project], /model [name], /image <path>, /clear, /launch designer, /exit\n"
 					if m.currentMode == ModeProject {
-						helpText += "Shortcuts: Ctrl+T (toggle mode), Ctrl+K (cycle models), Up/Down (history)"
+						helpText += "Shortcuts: Ctrl+T (toggle mode), Ctrl+K (cycle models), Up/Down (history)\n"
+						// Show vision support if current model supports it
+						modelInfo := m.getModelInfo(m.currentModel)
+						if modelInfo.Vision {
+							helpText += "\n📷 Vision enabled: Use /image <path> to add images to your next message"
+						}
 					} else {
 						helpText += "Press Ctrl+T to switch to PROJECT mode"
 					}
@@ -692,6 +796,89 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.textarea.SetValue("")
 					m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(renderChatContent(m)))
 					m.viewport.GotoBottom()
+				case "/image":
+					if m.currentMode != ModeProject {
+						m.messages = append(m.messages, ChatMessage{
+							Role:    "client",
+							Content: "Image support only available in PROJECT mode. Use Ctrl+T to switch.",
+						})
+						m.textarea.SetValue("")
+						break
+					}
+
+					// Check if current model supports vision
+					modelInfo := m.getModelInfo(m.currentModel)
+					if !modelInfo.Vision {
+						m.messages = append(m.messages, ChatMessage{
+							Role:    "client",
+							Content: fmt.Sprintf("⚠️  Model '%s' does not support vision. Switch to a vision model first.", m.currentModel),
+						})
+						m.textarea.SetValue("")
+						break
+					}
+
+					if len(fields) < 2 {
+						// Show current images or usage
+						if len(m.imagePaths) > 0 {
+							msg := fmt.Sprintf("📷 %d image(s) attached:\n", len(m.imagePaths))
+							for i, p := range m.imagePaths {
+								msg += fmt.Sprintf("  %d. %s\n", i+1, filepath.Base(p))
+							}
+							msg += "\nUse /image <path> to add more (max 10), or /image clear to remove all"
+							m.messages = append(m.messages, ChatMessage{Role: "client", Content: msg})
+						} else {
+							m.messages = append(m.messages, ChatMessage{
+								Role:    "client",
+								Content: "Usage: /image <path>\nAdd an image to your next message. Supports: jpg, png, gif, webp\nDrag & drop also supported!",
+							})
+						}
+						m.textarea.SetValue("")
+						break
+					}
+
+					imagePath := strings.Join(fields[1:], " ") // Support paths with spaces
+
+					if imagePath == "clear" {
+						m.imagePaths = []string{}
+						m.messages = append(m.messages, ChatMessage{Role: "client", Content: "📷 Cleared all attached images"})
+						m.textarea.SetValue("")
+						break
+					}
+
+					// Expand ~ to home directory
+					if strings.HasPrefix(imagePath, "~") {
+						home, _ := os.UserHomeDir()
+						imagePath = filepath.Join(home, imagePath[1:])
+					}
+
+					// Check if file exists
+					if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+						m.messages = append(m.messages, ChatMessage{
+							Role:    "client",
+							Content: fmt.Sprintf("⚠️  Image not found: %s", imagePath),
+						})
+						m.textarea.SetValue("")
+						break
+					}
+
+					// Check image limit (OpenAI spec allows 10)
+					if len(m.imagePaths) >= 10 {
+						m.messages = append(m.messages, ChatMessage{
+							Role:    "client",
+							Content: "⚠️  Maximum 10 images per message. Use '/image clear' to remove all.",
+						})
+						m.textarea.SetValue("")
+						break
+					}
+
+					// Add to image paths
+					m.imagePaths = append(m.imagePaths, imagePath)
+					m.messages = append(m.messages, ChatMessage{
+						Role:    "client",
+						Content: fmt.Sprintf("📷 Added image: %s (%d/10)", filepath.Base(imagePath), len(m.imagePaths)),
+					})
+					m.textarea.SetValue("")
+
 				case "/launch":
 					if len(fields) < 2 {
 						m.messages = append(m.messages, ChatMessage{Role: "client", Content: "Usage: /launch <component>. Components: designer"})
@@ -778,12 +965,44 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.history = append(m.history, msg)
 			m.histIndex = len(m.history)
-			m.messages = append(m.messages, ChatMessage{Role: "user", Content: msg})
+
+			// Create message - vision if images attached, otherwise text
+			var userMsg ChatMessage
+			var displayMsg ChatMessage
+			if len(m.imagePaths) > 0 {
+				visionMsg, err := createVisionMessage(msg, m.imagePaths)
+				if err != nil {
+					m.messages = append(m.messages, ChatMessage{
+						Role:    "error",
+						Content: fmt.Sprintf("Failed to process images: %v", err),
+					})
+					m.imagePaths = []string{} // Clear failed images
+					break
+				}
+				userMsg = visionMsg
+				// Show user-friendly confirmation with image count
+				displayMsg = ChatMessage{
+					Role:    "user",
+					Content: fmt.Sprintf("📷 %s [+%d image(s)]", msg, len(m.imagePaths)),
+				}
+				m.imagePaths = []string{} // Clear images after sending
+			} else {
+				userMsg = ChatMessage{Role: "user", Content: msg}
+				displayMsg = userMsg
+			}
+
+			// Add display message to chat history
+			m.messages = append(m.messages, displayMsg)
+
 			m.textarea.SetValue("")
 			m.thinking = true
 			m.printing = true
-			// Start channel-based streaming - important for showing progress
-			chunks, errs, _ := startChatStream(m.messages, chatCtx)
+			// Start channel-based streaming - send messages including the actual vision content
+			// We need to create a messages array that includes the vision message
+			messagesToSend := make([]ChatMessage, len(m.messages)-1)
+			copy(messagesToSend, m.messages[:len(m.messages)-1])
+			messagesToSend = append(messagesToSend, userMsg) // Use actual vision message for API
+			chunks, errs, _ := startChatStream(messagesToSend, chatCtx)
 			ch := make(chan tea.Msg, 32)
 			m.streamCh = ch
 			go func() {
@@ -925,20 +1144,21 @@ func computeTranscript(m chatModel) string {
 		baseStyle := lipgloss.NewStyle()
 		for _, message := range m.messages {
 			var line string
+			contentStr := getContentAsString(message)
 			switch message.Role {
 			case "assistant":
 				// Render Markdown content with ANSI styling
-				renderedContent := renderMarkdown(message.Content, m.width-len(m.getAssistantLabel())-4)
+				renderedContent := renderMarkdown(contentStr, m.width-len(m.getAssistantLabel())-4)
 				// Don't use lipgloss.Render on the rendered content to preserve ANSI codes
 				labelStyle := baseStyle.Foreground(lipgloss.Color("11"))
 				line = labelStyle.Render(m.getAssistantLabel()) + " " + renderedContent + "\n"
 			case "user":
 				style := baseStyle.Foreground(lipgloss.Color("#ccc"))
-				line = style.Bold(true).Render("> ") + style.Render(message.Content)
+				line = style.Bold(true).Render("> ") + style.Render(contentStr)
 			case "error":
-				line = baseStyle.Foreground(lipgloss.Color("9")).Render(message.Content)
+				line = baseStyle.Foreground(lipgloss.Color("9")).Render(contentStr)
 			case "client":
-				line = baseStyle.Foreground(lipgloss.Color("#666666")).Render(message.Content)
+				line = baseStyle.Foreground(lipgloss.Color("#666666")).Render(contentStr)
 			}
 
 			b.WriteString(line + "\n")
@@ -949,6 +1169,27 @@ func computeTranscript(m chatModel) string {
 	return b.String()
 }
 
+// getContentAsString safely extracts string content from a ChatMessage
+func getContentAsString(msg ChatMessage) string {
+	switch v := msg.Content.(type) {
+	case string:
+		return v
+	case []ContentPart:
+		// For multimodal, extract just text parts for display
+		var parts []string
+		for _, part := range v {
+			if part.Type == "text" {
+				parts = append(parts, part.Text)
+			} else if part.Type == "image_url" {
+				parts = append(parts, "[Image]")
+			}
+		}
+		return strings.Join(parts, " ")
+	default:
+		return "[Unsupported content type]"
+	}
+}
+
 func computeTranscriptKey(m chatModel) string {
 	h := fnv.New64a()
 	if len(m.messages) == 0 {
@@ -956,7 +1197,7 @@ func computeTranscriptKey(m chatModel) string {
 	}
 	msg := m.messages[len(m.messages)-1]
 	io.WriteString(h, msg.Role)
-	io.WriteString(h, msg.Content)
+	io.WriteString(h, getContentAsString(msg))
 	return fmt.Sprintf("%x", h.Sum64())
 }
 

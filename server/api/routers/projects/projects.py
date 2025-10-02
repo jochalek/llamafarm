@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import celery.result  # type: ignore
+import httpx
 from atomic_agents import AtomicAgent  # type: ignore
 from fastapi import APIRouter, Header, HTTPException, Response
 from openai.types.chat import ChatCompletion
@@ -251,6 +252,179 @@ def _delete_all_sessions(namespace: str, project_id: str) -> int:
     return len(to_delete)
 
 
+def has_vision_content(messages: list) -> bool:
+    """Check if any message contains image content."""
+    for msg in messages:
+        if hasattr(msg, 'content') and isinstance(msg.content, list):
+            for part in msg.content:
+                if (hasattr(part, 'type') and part.type == "image_url") or \
+                   (isinstance(part, dict) and part.get('type') == 'image_url'):
+                    return True
+    return False
+
+
+async def handle_vision_request(
+    request: ChatRequest,
+    model_config,
+    project_config,
+    project_dir: str,
+) -> ChatCompletion:
+    """Handle vision requests by calling the provider directly."""
+    from services.model_service import ModelService
+    from openai.types.chat import ChatCompletionMessage
+    from openai.types.chat.chat_completion import Choice
+
+    # Build provider URL based on config
+    if model_config.provider.value == "lemonade":
+        port = model_config.lemonade.port if model_config.lemonade else 8000
+        provider_url = f"http://localhost:{port}/api/v1/chat/completions"
+    elif model_config.provider.value == "ollama":
+        base_url = model_config.base_url or "http://localhost:11434"
+        provider_url = f"{base_url}/api/chat"
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Vision not supported for provider: {model_config.provider.value}"
+        )
+
+    # Get vision config defaults
+    vision_cfg = getattr(model_config, 'vision_config', None)
+    detail_level = "low"  # Default
+    if vision_cfg:
+        if hasattr(vision_cfg, 'detail'):
+            detail = vision_cfg.detail
+            detail_level = detail.value if hasattr(detail, 'value') else (detail or "low")
+
+    # Prepare messages for provider
+    provider_messages = []
+    for msg in request.messages:
+        provider_msg = {"role": msg.role}
+
+        if isinstance(msg.content, str):
+            provider_msg["content"] = msg.content
+        elif isinstance(msg.content, list):
+            # Convert to provider format
+            provider_content = []
+            for part in msg.content:
+                if hasattr(part, 'type'):
+                    if part.type == "text":
+                        provider_content.append({"type": "text", "text": part.text})
+                    elif part.type == "image_url":
+                        # Use config detail level if not specified in message
+                        img_detail = part.image_url.detail if hasattr(part.image_url, 'detail') and part.image_url.detail else detail_level
+                        provider_content.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": part.image_url.url,
+                                "detail": img_detail
+                            }
+                        })
+                elif isinstance(part, dict):
+                    provider_content.append(part)
+            provider_msg["content"] = provider_content
+
+        provider_messages.append(provider_msg)
+
+    # Call provider directly
+    # Use vision_config parameters if available, otherwise use defaults
+    max_tokens = 512
+    temperature = 0.1
+
+    if vision_cfg:
+        max_tokens = getattr(vision_cfg, 'max_tokens', 512) or 512
+        temperature = getattr(vision_cfg, 'temperature', 0.1) or 0.1
+
+    request_params = {
+        "model": model_config.model,
+        "messages": provider_messages,
+        "stream": False,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+
+    # Lemonade-specific optimizations
+    if model_config.provider.value == "lemonade":
+        request_params.update({
+            "top_p": 0.9,
+        })
+
+    # Use longer timeout for vision models (can take 2-5 minutes for detailed analysis)
+    # Get timeout from vision_config or use default
+    timeout_seconds = 300.0  # 5 minutes default
+    if vision_cfg and hasattr(vision_cfg, 'timeout'):
+        timeout_seconds = getattr(vision_cfg, 'timeout', 300.0) or 300.0
+
+    # Log start of vision processing for user visibility
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Vision request starting: model={model_config.model}, detail={detail_level}, max_tokens={max_tokens}, timeout={timeout_seconds}s")
+
+    # Log the actual image details being sent
+    for i, msg in enumerate(provider_messages):
+        if isinstance(msg.get('content'), list):
+            for j, part in enumerate(msg['content']):
+                if isinstance(part, dict) and part.get('type') == 'image_url':
+                    img_url = part.get('image_url', {})
+                    img_detail = img_url.get('detail', 'not set')
+                    # Log first 100 chars of base64 to verify image is present
+                    url_preview = img_url.get('url', '')[:100]
+                    logger.info(f"Image {j+1} in message {i+1}: detail={img_detail}, url_prefix={url_preview}")
+
+    # Create timeout config for httpx (needs all timeout types set)
+    timeout_config = httpx.Timeout(
+        connect=30.0,              # 30s to connect
+        read=timeout_seconds,      # Main timeout for reading response
+        write=30.0,                # 30s to write request
+        pool=30.0                  # 30s for pool operations
+    )
+
+    async with httpx.AsyncClient(timeout=timeout_config) as client:
+        response = await client.post(
+            provider_url,
+            json=request_params
+        )
+
+        logger.info(f"Vision request completed: status={response.status_code}, response_time={response.elapsed.total_seconds():.2f}s")
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Provider error: {response.text}"
+            )
+
+        result = response.json()
+
+        # Debug logging
+        logger.info(f"Vision response received: status={response.status_code}, result_keys={list(result.keys())}")
+        logger.info(f"Vision response content: {result.get('choices', [{}])[0].get('message', {}).get('content', 'NO CONTENT')[:200]}")
+
+        # Convert provider response to OpenAI format
+        if model_config.provider.value == "lemonade":
+            # Lemonade returns OpenAI-compatible format
+            completion = ChatCompletion(**result)
+            logger.info(f"Vision completion created: choices={len(completion.choices)}, first_content={completion.choices[0].message.content[:100] if completion.choices else 'NO CHOICES'}")
+            return completion
+        else:
+            # Handle other providers
+            content = result.get("message", {}).get("content", "")
+            return ChatCompletion(
+                id=f"chat-{uuid.uuid4()}",
+                object="chat.completion",
+                created=int(time.time()),
+                model=model_config.model,
+                choices=[
+                    Choice(
+                        index=0,
+                        message=ChatCompletionMessage(
+                            role="assistant",
+                            content=content,
+                        ),
+                        finish_reason="stop",
+                    )
+                ],
+            )
+
+
 @router.post(
     "/{namespace}/{project_id}/chat/completions", response_model=ChatCompletion
 )
@@ -265,6 +439,91 @@ async def chat(
     """Send a message to the chat agent"""
     project_dir = ProjectService.get_project_dir(namespace, project_id)
     project_config = ProjectService.load_config(namespace, project_id)
+
+    # Get model config to check for vision support
+    from services.model_service import ModelService
+    model_config = ModelService.get_model_config(project_config, request.model)
+
+    # Check if this is a vision request (has images) AND model supports vision
+    if has_vision_content(request.messages):
+        # Vision request detected - use direct provider call
+        prompt_format = getattr(model_config, 'prompt_format', None)
+        # Handle both string and enum values
+        prompt_format_str = prompt_format.value if hasattr(prompt_format, 'value') else prompt_format
+        vision_enabled = getattr(model_config, 'vision', False)
+
+        # Debug logging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Vision request detected. Model: {request.model}, prompt_format: {prompt_format_str}, vision: {vision_enabled}")
+
+        if prompt_format_str == 'image' or vision_enabled:
+            completion = await handle_vision_request(
+                request=request,
+                model_config=model_config,
+                project_config=project_config,
+                project_dir=project_dir,
+            )
+            # Set session header if needed
+            if not x_no_session and session_id:
+                set_session_header(response, session_id)
+            elif not x_no_session:
+                new_session_id = str(uuid.uuid4())
+                set_session_header(response, new_session_id)
+
+            # If streaming requested, convert to SSE format
+            if request.stream:
+                from fastapi.responses import StreamingResponse
+                import json
+
+                async def vision_stream():
+                    # Send the complete message as a single chunk
+                    if completion.choices:
+                        content = completion.choices[0].message.content
+                        chunk_data = {
+                            "id": completion.id,
+                            "object": "chat.completion.chunk",
+                            "created": completion.created,
+                            "model": completion.model,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {"role": "assistant", "content": content},
+                                "finish_reason": None
+                            }]
+                        }
+                        yield f"data: {json.dumps(chunk_data)}\n\n"
+
+                        # Send final chunk with finish_reason
+                        final_chunk = {
+                            "id": completion.id,
+                            "object": "chat.completion.chunk",
+                            "created": completion.created,
+                            "model": completion.model,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {},
+                                "finish_reason": "stop"
+                            }]
+                        }
+                        yield f"data: {json.dumps(final_chunk)}\n\n"
+                    yield "data: [DONE]\n\n"
+
+                return StreamingResponse(
+                    vision_stream(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    }
+                )
+            else:
+                return completion
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model '{request.model or 'default'}' does not support vision. Set prompt_format='image' or vision=true in config."
+            )
 
     now = time.time()
     stateless = x_no_session is not None
@@ -317,7 +576,18 @@ async def chat(
     latest_user_message = None
     for msg in reversed(request.messages):
         if msg.role == "user" and msg.content:
-            latest_user_message = msg.content
+            # Handle both string and multimodal (list) content
+            if isinstance(msg.content, str):
+                latest_user_message = msg.content
+            elif isinstance(msg.content, list):
+                # For multimodal content, extract text parts
+                text_parts = []
+                for part in msg.content:
+                    if hasattr(part, 'type') and part.type == "text":
+                        text_parts.append(part.text)
+                    elif isinstance(part, dict) and part.get('type') == 'text':
+                        text_parts.append(part.get('text', ''))
+                latest_user_message = ' '.join(text_parts) if text_parts else None
             break
 
     # If no user message, check if this is a greeting request (new session)
@@ -390,11 +660,14 @@ async def chat(
         )
 
     try:
+        # For vision messages, we need to pass the full multimodal content
+        # Currently the agent only supports text, so we extract text for now
+        # TODO: Refactor agent to support multimodal messages natively
         completion = await project_chat_service.chat(
             project_dir=project_dir,
             project_config=project_config,
             chat_agent=agent,
-            message=latest_user_message,
+            message=latest_user_message or "",  # Ensure we have a string
             rag_enabled=request.rag_enabled,
             database=request.database,
             rag_top_k=request.rag_top_k,
