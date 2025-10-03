@@ -131,13 +131,8 @@ properties:
               description: "Path to multimodal projector file (for llamacpp vision models)"
             vision_config:
               type: ["object", "null"]
-              description: "Vision-specific configuration for image processing"
+              description: "Vision-specific configuration for image processing and optimization"
               properties:
-                detail:
-                  type: ["string", "null"]
-                  enum: [low, high, auto, null]
-                  default: low
-                  description: "Image detail level (low=512px max/faster, high=2048px max/slower, auto=adaptive)"
                 max_tokens:
                   type: ["integer", "null"]
                   default: 512
@@ -153,18 +148,43 @@ properties:
                 max_image_size_kb:
                   type: ["integer", "null"]
                   default: 500
-                  description: "Warn if image exceeds this size in KB"
+                  description: "Maximum image size in KB before resizing (when resize_images is true)"
                 resize_images:
                   type: ["boolean", "null"]
-                  default: false
-                  description: "Automatically resize images (future feature)"
+                  default: true
+                  description: "Automatically resize images larger than max_image_size_kb"
                 max_dimension:
                   type: ["integer", "null"]
-                  default: 512
-                  description: "Maximum width/height when resizing (future feature)"
+                  default: 768
+                  description: "Maximum width/height in pixels when resizing images"
+            model_info:
+              type: ["object", "null"]
+              description: "Model pull/download information (used by 'lf models pull' command)"
+              properties:
+                checkpoint:
+                  type: ["string", "null"]
+                  description: "HuggingFace checkpoint (e.g., 'google/gemma-3-4b-it-qat-q4_0-gguf')"
+                  example: "google/gemma-3-4b-it-qat-q4_0-gguf"
+                variant:
+                  type: ["string", "null"]
+                  description: "Variant/quantization for GGUF models (e.g., 'Q4_0', 'Q8_0')"
+                  example: "Q4_0"
+                recipe:
+                  type: ["string", "null"]
+                  enum: [llamacpp, transformers, onnx, null]
+                  description: "Recipe/backend for Lemonade models"
+                  example: "llamacpp"
+                reasoning:
+                  type: ["boolean", "null"]
+                  default: false
+                  description: "Whether this is a reasoning model (Lemonade)"
+                mmproj_file:
+                  type: ["string", "null"]
+                  description: "Multimodal projector file name for vision models (Lemonade)"
+
             lemonade:
               type: ["object", "null"]
-              description: "Lemonade-specific configuration"
+              description: "Lemonade-specific runtime configuration"
               properties:
                 backend:
                   type: ["string", "null"]

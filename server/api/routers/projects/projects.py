@@ -287,13 +287,23 @@ async def handle_vision_request(
             detail=f"Vision not supported for provider: {model_config.provider.value}"
         )
 
-    # Get vision config defaults
+    # Get vision config for image optimization
     vision_cfg = getattr(model_config, 'vision_config', None)
-    detail_level = "low"  # Default
+
+    # Image resize settings (server-side optimization)
+    resize_enabled = True  # Default enabled
+    max_dimension = 768    # Default
+    max_size_kb = 500      # Default
+
     if vision_cfg:
-        if hasattr(vision_cfg, 'detail'):
-            detail = vision_cfg.detail
-            detail_level = detail.value if hasattr(detail, 'value') else (detail or "low")
+        resize_enabled = getattr(vision_cfg, 'resize_images', True)
+        if resize_enabled is None:
+            resize_enabled = True
+        max_dimension = getattr(vision_cfg, 'max_dimension', 768) or 768
+        max_size_kb = getattr(vision_cfg, 'max_image_size_kb', 500) or 500
+
+    # Import resize utility
+    from utils.image_utils import resize_base64_image
 
     # Prepare messages for provider
     provider_messages = []
@@ -310,13 +320,19 @@ async def handle_vision_request(
                     if part.type == "text":
                         provider_content.append({"type": "text", "text": part.text})
                     elif part.type == "image_url":
-                        # Use config detail level if not specified in message
-                        img_detail = part.image_url.detail if hasattr(part.image_url, 'detail') and part.image_url.detail else detail_level
+                        # Resize image if enabled in config
+                        image_url = part.image_url.url
+                        if resize_enabled and image_url.startswith("data:"):
+                            image_url, was_resized = resize_base64_image(
+                                image_url,
+                                max_dimension=max_dimension,
+                                max_size_kb=max_size_kb
+                            )
+
                         provider_content.append({
                             "type": "image_url",
                             "image_url": {
-                                "url": part.image_url.url,
-                                "detail": img_detail
+                                "url": image_url
                             }
                         })
                 elif isinstance(part, dict):
@@ -357,7 +373,7 @@ async def handle_vision_request(
     # Log start of vision processing for user visibility
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"Vision request starting: model={model_config.model}, detail={detail_level}, max_tokens={max_tokens}, timeout={timeout_seconds}s")
+    logger.info(f"Vision request starting: model={model_config.model}, max_tokens={max_tokens}, timeout={timeout_seconds}s, resize={resize_enabled}")
 
     # Log the actual image details being sent
     for i, msg in enumerate(provider_messages):
@@ -365,10 +381,9 @@ async def handle_vision_request(
             for j, part in enumerate(msg['content']):
                 if isinstance(part, dict) and part.get('type') == 'image_url':
                     img_url = part.get('image_url', {})
-                    img_detail = img_url.get('detail', 'not set')
                     # Log first 100 chars of base64 to verify image is present
                     url_preview = img_url.get('url', '')[:100]
-                    logger.info(f"Image {j+1} in message {i+1}: detail={img_detail}, url_prefix={url_preview}")
+                    logger.info(f"Image {j+1} in message {i+1}: url_prefix={url_preview}")
 
     # Create timeout config for httpx (needs all timeout types set)
     timeout_config = httpx.Timeout(

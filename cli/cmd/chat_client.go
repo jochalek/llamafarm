@@ -7,10 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"image"
-	"image/gif"
-	"image/jpeg"
-	"image/png"
 	"io"
 	"net/http"
 	"os"
@@ -18,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/image/draw"
 	"gopkg.in/yaml.v2"
 )
 
@@ -660,18 +655,14 @@ func fetchSessionHistory(serverURL, namespace, projectID, sessionID string) []st
 	return history
 }
 
-// encodeImageToBase64 reads an image file, optimizes it, and returns a base64-encoded data URL
+// encodeImageToBase64 reads an image file and returns a base64-encoded data URL
+// Note: Image resizing is handled server-side based on vision_config settings
 func encodeImageToBase64(imagePath string) (string, error) {
 	// Read the image file
 	imageData, err := os.ReadFile(imagePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read image file: %w", err)
 	}
-
-	// For vision models with detail="low", we should resize to ~512px max dimension
-	// This matches what the vision model will use internally and speeds up processing
-	const maxDimension = 768 // Slightly above 512 to preserve quality
-	const maxSize = 500 * 1024 // 500KB target
 
 	// Detect MIME type from file extension
 	ext := strings.ToLower(filepath.Ext(imagePath))
@@ -689,87 +680,12 @@ func encodeImageToBase64(imagePath string) (string, error) {
 		mimeType = "image/png" // Default to PNG
 	}
 
-	// Check if we should resize (file too large)
-	if len(imageData) > maxSize {
-		sizeBefore := float64(len(imageData)) / (1024 * 1024)
-
-		// Use pure Go image resizing (cross-platform)
-		resizedData, err := resizeImage(imageData, maxDimension, ext)
-		if err != nil {
-			// Resize failed, just warn and continue with original
-			logDebug(fmt.Sprintf("Warning: Large image (%.2f MB) - resize failed: %v", sizeBefore, err))
-		} else if len(resizedData) < len(imageData) {
-			imageData = resizedData
-			sizeAfter := float64(len(resizedData)) / (1024 * 1024)
-			logDebug(fmt.Sprintf("Resized image: %.2f MB -> %.2f MB (%.0f%% reduction)",
-				sizeBefore, sizeAfter, (1-sizeAfter/sizeBefore)*100))
-		}
-	}
-
 	// Encode to base64
 	encoded := base64.StdEncoding.EncodeToString(imageData)
 
-	// Return as data URL with detail=low for faster processing
-	// Note: OpenAI vision API supports detail parameter for image quality/speed tradeoff
+	// Return as data URL
+	// Server will handle resizing based on vision_config.resize_images setting
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, encoded), nil
-}
-
-// resizeImage resizes an image to fit within maxDimension (cross-platform pure Go)
-func resizeImage(imageData []byte, maxDimension int, ext string) ([]byte, error) {
-	// Decode image
-	img, format, err := image.Decode(bytes.NewReader(imageData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode image: %w", err)
-	}
-
-	// Get original dimensions
-	bounds := img.Bounds()
-	width := bounds.Dx()
-	height := bounds.Dy()
-
-	// Calculate new dimensions maintaining aspect ratio
-	var newWidth, newHeight int
-	if width > height {
-		if width > maxDimension {
-			newWidth = maxDimension
-			newHeight = (height * maxDimension) / width
-		} else {
-			return imageData, nil // No resize needed
-		}
-	} else {
-		if height > maxDimension {
-			newHeight = maxDimension
-			newWidth = (width * maxDimension) / height
-		} else {
-			return imageData, nil // No resize needed
-		}
-	}
-
-	// Create new image
-	dst := image.NewRGBA(image.Rect(0, 0, newWidth, newHeight))
-
-	// Resize using high-quality bilinear interpolation
-	draw.BiLinear.Scale(dst, dst.Bounds(), img, img.Bounds(), draw.Over, nil)
-
-	// Encode resized image
-	var buf bytes.Buffer
-	switch format {
-	case "jpeg":
-		err = jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 85})
-	case "png":
-		err = png.Encode(&buf, dst)
-	case "gif":
-		err = gif.Encode(&buf, dst, nil)
-	default:
-		// Default to PNG for unknown formats
-		err = png.Encode(&buf, dst)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode resized image: %w", err)
-	}
-
-	return buf.Bytes(), nil
 }
 
 // createVisionMessage creates a multimodal message with text and images
@@ -784,12 +700,6 @@ func createVisionMessage(text string, imagePaths []string) (ChatMessage, error) 
 		imagePaths = imagePaths[:maxImages]
 	}
 
-	// Default to "low" detail for faster processing
-	// "low" = 512x512 max, "high" = 2048x2048 max (much slower)
-	// For Qwen2.5-VL, low detail is usually sufficient and 3-4x faster
-	// Note: Server can override this based on model's vision_config
-	detailLevel := "low"
-
 	for _, imgPath := range imagePaths {
 		dataURL, err := encodeImageToBase64(imgPath)
 		if err != nil {
@@ -798,8 +708,8 @@ func createVisionMessage(text string, imagePaths []string) (ChatMessage, error) 
 		content = append(content, ContentPart{
 			Type: "image_url",
 			ImageURL: &ImageURL{
-				URL:    dataURL,
-				Detail: &detailLevel,
+				URL: dataURL,
+				// Server will handle image optimization based on vision_config
 			},
 		})
 	}

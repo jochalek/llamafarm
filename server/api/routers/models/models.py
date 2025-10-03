@@ -24,7 +24,8 @@ class PullModelRequest(BaseModel):
     model_name: str
     provider: str  # Which provider to pull from
     # Optional provider-specific parameters
-    checkpoint: str | None = None  # For Lemonade custom models
+    checkpoint: str | None = None  # For Lemonade custom models (e.g., "google/gemma-3-4b-it-qat-q4_0-gguf")
+    variant: str | None = None  # For Lemonade GGUF models (e.g., "Q4_0", "Q8_0") - appended to checkpoint
     recipe: str | None = None  # For Lemonade (llamacpp, transformers, etc.)
     vision: bool = False  # For Lemonade vision models
     reasoning: bool = False  # For Lemonade reasoning models
@@ -118,7 +119,10 @@ async def pull_model(
 
     For Lemonade:
     - model_name: "Qwen2.5-VL-7B-Instruct-GGUF" (registered)
-    - OR model_name: "user.CustomModel" with checkpoint, recipe, etc.
+    - OR model_name: "user.CustomModel" with:
+      - checkpoint: "google/gemma-3-4b-it-qat-q4_0-gguf" (HuggingFace repo)
+      - variant: "Q4_0" (quantization variant for GGUF models)
+      - recipe: "llamacpp" (optional, defaults to llamacpp for GGUF)
     """
     project_config = ProjectService.load_config(namespace, project_id)
 
@@ -158,6 +162,8 @@ async def pull_model(
     elif request.provider == "lemonade":
         if request.checkpoint:
             options["checkpoint"] = request.checkpoint
+        if request.variant:
+            options["variant"] = request.variant
         if request.recipe:
             options["recipe"] = request.recipe
         if request.vision:

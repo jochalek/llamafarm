@@ -829,7 +829,7 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						} else {
 							m.messages = append(m.messages, ChatMessage{
 								Role:    "client",
-								Content: "Usage: /image <path>\nAdd an image to your next message. Supports: jpg, png, gif, webp\nDrag & drop also supported!",
+								Content: "Usage: /image <path>\nAdd an image to your next message. Supports: jpg, png, gif, webp\nPaths with spaces are supported. Quote paths if needed.\nDrag & drop also supported!",
 							})
 						}
 						m.textarea.SetValue("")

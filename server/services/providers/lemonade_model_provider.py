@@ -70,6 +70,9 @@ class LemonadeModelProvider(ModelManagementProvider):
             model_name: Model name (registered or user.ModelName)
             **options:
                 checkpoint: str - HuggingFace checkpoint (for new models)
+                                  Format: "org/repo-name" or "org/repo-name:variant"
+                                  For GGUF models, variant is required (e.g., "google/gemma-3-4b-it-qat-q4_0-gguf:Q4_0")
+                variant: str - Optional variant override (e.g., "Q4_0", "Q8_0")
                 recipe: str - Recipe name (llamacpp, transformers, etc.)
                 vision: bool - Whether model supports vision
                 reasoning: bool - Whether model has reasoning
@@ -82,7 +85,14 @@ class LemonadeModelProvider(ModelManagementProvider):
 
         # Add optional parameters for custom models
         if "checkpoint" in options:
-            payload["checkpoint"] = options["checkpoint"]
+            checkpoint = options["checkpoint"]
+
+            # Handle variant parameter - append to checkpoint if provided separately
+            if "variant" in options and ":" not in checkpoint:
+                checkpoint = f"{checkpoint}:{options['variant']}"
+
+            payload["checkpoint"] = checkpoint
+
         if "recipe" in options:
             payload["recipe"] = options["recipe"]
         if "vision" in options:
