@@ -22,6 +22,7 @@ from tools.core.project_schema_system import (
     ProjectConfigManipulator,
     LLMConfigurationAssistant
 )
+from config.runtime_helpers import get_active_model
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ class ProjectContextAnalyzer:
             # Determine AI provider
             provider = AIProvider.GENERIC
             if config.runtime and config.runtime.models:
-                model = config.runtime.get_active_model()
+                model = get_active_model(config.runtime)
                 if model.provider.value == "openai":
                     provider = AIProvider.OPENAI
                 elif model.provider.value == "ollama":
@@ -156,7 +157,7 @@ class ProjectContextAnalyzer:
             model_name = None
             if config.runtime and config.runtime.models:
                 try:
-                    model = config.runtime.get_active_model()
+                    model = get_active_model(config.runtime)
                     model_name = model.model
                 except ValueError:
                     pass  # No models configured

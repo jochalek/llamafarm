@@ -341,7 +341,27 @@ def load_config(
     """
 
     config_dict = load_config_dict(config_path, directory, validate)
-    return LlamaFarmConfig(**config_dict)
+    try:
+        return LlamaFarmConfig(**config_dict)
+    except Exception as e:
+        # Enhanced error logging for debugging
+        print(f"\n{'='*80}")
+        print(f"VALIDATION ERROR DETAILS:")
+        print(f"{'='*80}")
+        print(f"Error type: {type(e).__name__}")
+        if hasattr(e, 'errors'):
+            print(f"\nField-level errors ({len(e.errors())} total):")
+            for i, err in enumerate(e.errors(), 1):
+                field_path = ' -> '.join(str(loc) for loc in err['loc'])
+                print(f"\n{i}. Field: {field_path}")
+                print(f"   Type: {err['type']}")
+                print(f"   Message: {err['msg']}")
+                if 'input' in err:
+                    print(f"   Input value: {err['input']}")
+        else:
+            print(f"\nError message: {e}")
+        print(f"{'='*80}\n")
+        raise
 
 
 # ============================================================================

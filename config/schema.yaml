@@ -123,3 +123,50 @@ properties:
               type: ["object", "null"]
               description: "Provider-specific configuration (e.g., lemonade settings, ollama options)"
               additionalProperties: true
+
+  agents:
+    type: ["array", "null"]
+    description: "Agent configurations for orchestration and workflows"
+    items:
+      type: object
+      required:
+        - name
+        - type
+      properties:
+        name:
+          type: string
+          description: "Agent identifier (unique name)"
+
+        type:
+          type: string
+          description: "Agent type (chat_orchestrator, document_analyzer, rag_validator, custom)"
+          enum: [chat_orchestrator, document_analyzer, rag_validator, report_generator, workflow_orchestrator, custom]
+
+        model:
+          type: ["string", "null"]
+          description: "Model name from runtime.models to use (defaults to default_model)"
+
+        description:
+          type: ["string", "null"]
+          description: "Human-readable description"
+
+        system_prompt:
+          type: ["string", "null"]
+          description: "Override system prompt for this agent"
+
+        tools:
+          type: ["array", "null"]
+          items:
+            type: string
+          description: "List of tool names this agent can use"
+
+        prompt_format:
+          type: ["string", "null"]
+          enum: [structured, unstructured, null]
+          description: "Override prompt format"
+
+        config:
+          type: ["object", "null"]
+          additionalProperties: true
+          description: "Agent-specific configuration"
+    default: []

@@ -2,6 +2,8 @@
 
 This document summarizes everything an automated collaborator needs to get LlamaFarm running, extend it, and keep configuration accurate.
 
+As you write code; ensure you look for type errors and ensure every new type is needed. 
+
 ## 1. Prerequisites & Fast Start
 1. **Install Docker** – required for auto-starting the API + RAG worker.
 2. **Install Ollama** – current default runtime; download from https://ollama.com/download.
@@ -230,7 +232,75 @@ lf chat --curl "What models are configured?"     # Show curl equivalent
 4. Import and use via `from core.settings import settings`
 5. Update tests to mock the settings object if needed
 
-## 10. Upgrade / Development Notes
+## 10. Troubleshooting: Clearing Caches
+
+When schema changes or datamodel updates don't seem to take effect, or when you encounter stale validation errors, clear all caches and restart services:
+
+### Clear Python Caches
+```bash
+# Remove all __pycache__ directories and .pyc files
+find /path/to/llamafarm-1 -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null
+find /path/to/llamafarm-1 -type f -name "*.pyc" -delete 2>/dev/null
+```
+
+### Clear Celery Results Cache
+```bash
+# Clear cached task results (may show stale errors)
+find ~/.llamafarm/broker/results/ -type f -delete
+```
+
+### Restart Services with Fresh Imports
+```bash
+# Kill all running services
+pkill -f "nx start server"
+pkill -f "nx start rag"
+pkill -f "nx start lemonade"
+
+# Restart with PYTHONDONTWRITEBYTECODE to prevent new cache files
+cd /path/to/llamafarm-1
+PYTHONDONTWRITEBYTECODE=1 nx start server &
+PYTHONDONTWRITEBYTECODE=1 nx start rag &
+PYTHONDONTWRITEBYTECODE=1 nx start lemonade &
+```
+
+### Nuclear Option: Rebuild Virtual Environment
+
+**If normal cache clearing doesn't work** (persistent validation errors after schema changes):
+
+```bash
+# 1. Kill all processes
+pkill -9 -f "celery"
+pkill -9 -f "nx start"
+pkill -9 -f "python.*main"
+pkill -9 -f "uvicorn"
+
+# 2. Clear UV cache (8+ GB of cached compiled modules)
+uv cache clean
+
+# 3. Delete the entire virtual environment
+rm -rf /path/to/llamafarm-1/.venv
+
+# 4. Clear all Python caches
+find /path/to/llamafarm-1 -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null
+find ~/.llamafarm/broker/results/ -type f -delete
+
+# 5. Start services (will rebuild .venv automatically)
+PYTHONDONTWRITEBYTECODE=1 nx start server &
+sleep 30  # Wait for venv rebuild
+PYTHONDONTWRITEBYTECODE=1 nx start rag &
+```
+
+**Why this works:** Celery's prefork worker model causes parent processes to load Python modules into memory before forking child processes. Stale compiled bytecode in `.venv/lib/*/site-packages/` persists even after clearing `__pycache__`. Rebuilding `.venv` ensures all compiled modules are regenerated from current source code.
+
+### Common Scenarios Requiring Cache Clear
+
+1. **After running `./generate-types.sh`**: Always clear Python caches and restart services so they load the new datamodel
+2. **After schema changes**: Regenerate types, clear caches, restart
+3. **Persistent validation errors**: Old Celery task results may be cached - clear broker/results
+4. **Import errors after refactoring**: Python may have cached old module locations
+5. **Validation errors persist after clearing caches**: Rebuild `.venv` (see Nuclear Option above)
+
+## 11. Upgrade / Development Notes
 - Always run research/plan steps from `.agents/commands/` before making changes.
 - Keep docs in sync with behaviour—update Docusaurus pages when workflows/schema change.
 - Never commit secrets; use local `.env` and update `.env.example` for new variables.
@@ -240,7 +310,7 @@ lf chat --curl "What models are configured?"     # Show curl equivalent
   - Avoid dynamic imports or module lookup hacks (e.g., `sys.modules.get("os", __import__("os"))`)
   - Follow centralized configuration management patterns
 
-## 11. Additional Resources
+## 12. Additional Resources
 - Project structure overview: `AGENTS.md`
 - Contribution process: `CONTRIBUTING.md`
 - Credits: `docs/CREDITS.md`

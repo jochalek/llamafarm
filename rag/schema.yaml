@@ -1830,7 +1830,7 @@ definitions:
         description: Multiple embedding strategies for hybrid search
         items:
           type: object
-          required: [name, type]
+          required: [name, type, config]
           additionalProperties: false
           properties:
             name:
@@ -1863,7 +1863,7 @@ definitions:
         description: Multiple retrieval strategies for different query patterns
         items:
           type: object
-          required: [name, type]
+          required: [name, type, config]
           additionalProperties: false
           properties:
             name:
@@ -1926,6 +1926,7 @@ definitions:
         minItems: 1
         items:
           type: object
+          required: [type, config]
           additionalProperties: false
           properties:
             type:
@@ -1996,7 +1997,7 @@ definitions:
         description: Metadata and feature extractors
         items:
           type: object
-          required: [type]
+          required: [type, config]
           additionalProperties: false
           properties:
             type:

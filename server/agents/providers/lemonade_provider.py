@@ -12,6 +12,7 @@ repo_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(repo_root))
 
 from config.datamodel import LlamaFarmConfig, PromptFormat  # noqa: E402
+from config.runtime_helpers import get_active_model  # noqa: E402
 from .base import RuntimeProvider
 from .health import HealthCheckResult
 
@@ -21,7 +22,7 @@ class LemonadeProvider(RuntimeProvider):
 
     def get_base_url(self, config: LlamaFarmConfig) -> str:
         """Get base URL for Lemonade API."""
-        model = config.runtime.get_active_model()
+        model = get_active_model(config.runtime)
         if model.base_url:
             return model.base_url
 
@@ -33,7 +34,7 @@ class LemonadeProvider(RuntimeProvider):
 
     def get_api_key(self, config: LlamaFarmConfig) -> str:
         """Get API key for Lemonade (uses 'lemonade' as default)."""
-        model = config.runtime.get_active_model()
+        model = get_active_model(config.runtime)
         return model.api_key or "lemonade"
 
     def get_default_instructor_mode(self) -> instructor.Mode:
@@ -44,7 +45,7 @@ class LemonadeProvider(RuntimeProvider):
         self, config: LlamaFarmConfig
     ) -> instructor.client.AsyncInstructor | AsyncOpenAI:
         """Get Lemonade client with optional instructor wrapping."""
-        model = config.runtime.get_active_model()
+        model = get_active_model(config.runtime)
         client = AsyncOpenAI(
             api_key=self.get_api_key(config),
             base_url=self.get_base_url(config),
@@ -57,7 +58,7 @@ class LemonadeProvider(RuntimeProvider):
 
     def _determine_mode(self, config: LlamaFarmConfig) -> instructor.Mode:
         """Determine instructor mode from config or use default."""
-        model = config.runtime.get_active_model()
+        model = get_active_model(config.runtime)
         if model.instructor_mode:
             return instructor.mode.Mode[model.instructor_mode.upper()]
         return self.get_default_instructor_mode()
