@@ -178,8 +178,12 @@ func startServerContainerForService(serverURL string) error {
 }
 
 func startRAGContainerForService(serverURL string) error {
-	orchestrator := NewContainerOrchestrator()
-	return orchestrator.startRAGContainer()
+	// DISABLED: Use local 'nx start rag' instead of Docker container
+	// orchestrator := NewContainerOrchestrator()
+	// return orchestrator.startRAGContainer()
+
+	// Return nil to indicate service is handled externally
+	return nil
 }
 
 func waitForServerReadyForService(serverURL string, timeout time.Duration) error {
