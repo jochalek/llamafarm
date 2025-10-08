@@ -1,0 +1,35 @@
+{
+  "root": "agents/",
+  "targets": {
+    "start": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "cwd": "{workspaceRoot}/agents",
+        "command": "uv run python main.py",
+        "output": "inherit"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "docker build -t llamafarm-agents -f agents/Dockerfile ."
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}/agents",
+        "command": "uv run pytest -v --cov=. --cov-report=term-missing"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}/agents",
+        "command": "uv run ruff check ."
+      }
+    }
+  }
+}

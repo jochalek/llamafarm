@@ -47,5 +47,9 @@ class Settings(BaseSettings, env_file=".env"):
     lemonade_host: str = "127.0.0.1"
     lemonade_api_key: str = "lemonade"
 
+    # Agents Service Configuration
+    agents_service_url: str = "http://localhost:8003"
+    agents_service_enabled: bool = True  # Feature flag for agents service
+
 
 settings = Settings()
