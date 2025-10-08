@@ -138,6 +138,15 @@ var ServiceGraph = map[string]*ServiceDefinition{
 		StartLocal:      startRAGContainerForService,
 		WaitReady:       waitForRAGReadyForService,
 	},
+	"agents": {
+		Name:            "agents",
+		Dependencies:    []string{"server"}, // Depends on server for API access
+		CanStartLocally: true,
+		DefaultTimeout:  30 * time.Second,
+		CheckHealth:     checkAgentsHealthForService,
+		StartLocal:      startAgentsContainerForService,
+		WaitReady:       waitForAgentsReadyForService,
+	},
 }
 
 // Service-specific health check functions
@@ -184,6 +193,64 @@ func startRAGContainerForService(serverURL string) error {
 
 	// Return nil to indicate service is handled externally
 	return nil
+}
+
+func checkAgentsHealthForService(serverURL string) (*Component, error) {
+	// Check agents service health at localhost:8003
+	agentsURL := "http://localhost:8003/health"
+	resp, err := http.Get(agentsURL)
+	if err != nil {
+		return nil, fmt.Errorf("agents service not reachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("agents service returned status %d", resp.StatusCode)
+	}
+
+	var health struct {
+		Status            string   `json:"status"`
+		Service           string   `json:"service"`
+		Version           string   `json:"version"`
+		AgentTypesLoaded  int      `json:"agent_types_loaded"`
+		AgentTypes        []string `json:"agent_types"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		return nil, fmt.Errorf("failed to decode agents health response: %w", err)
+	}
+
+	return &Component{
+		Name:    "agents",
+		Status:  health.Status,
+		Message: fmt.Sprintf("%d agent types loaded", health.AgentTypesLoaded),
+	}, nil
+}
+
+func startAgentsContainerForService(serverURL string) error {
+	// DISABLED: Use local 'nx start agents' instead of Docker container
+	// Will be implemented in future phases for Docker support
+
+	// Return nil to indicate service is handled externally
+	return nil
+}
+
+func waitForAgentsReadyForService(serverURL string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	agentsURL := "http://localhost:8003/health/ready"
+
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(agentsURL)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resp.Body.Close()
+			return nil
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return fmt.Errorf("agents service did not become ready within %v", timeout)
 }
 
 func waitForServerReadyForService(serverURL string, timeout time.Duration) error {
@@ -501,6 +568,7 @@ func StartCommandConfig(serverURL string) *ServiceOrchestrationConfig {
 		ServiceNeeds: map[string]ServiceRequirement{
 			"server": ServiceRequired,
 			"rag":    ServiceOptional, // Start async, don't wait
+			"agents": ServiceOptional, // Start async, don't wait
 		},
 		DefaultTimeout: 45 * time.Second,
 	}
