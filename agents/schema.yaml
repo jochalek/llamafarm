@@ -1,0 +1,159 @@
+# Agents Schema
+# This schema defines agent configurations in llamafarm.yaml
+
+# Root: array of agent configurations
+type: array
+description: List of agent configurations
+items:
+  type: object
+  required:
+    - name
+    - type
+  properties:
+    name:
+      type: string
+      description: Unique agent identifier
+    type:
+      $ref: '#/$defs/agentType'
+    model:
+      type: string
+      description: Model name to use (references runtime.models.name)
+    description:
+      type: string
+      description: Human-readable description of the agent
+    system_prompt:
+      type: string
+      description: Custom system prompt for the agent
+    config:
+      type: object
+      description: Agent-specific configuration
+      additionalProperties: true
+
+$defs:
+  # =============================================================================
+  # Agent Types
+  # =============================================================================
+
+  agentType:
+    type: string
+    enum:
+      - document_analyzer
+      - rag_validator
+      - report_generator
+      - workflow_orchestrator
+    description: Type of agent
+
+  # =============================================================================
+  # Document Analyzer Configuration
+  # =============================================================================
+
+  documentAnalyzerConfig:
+    type: object
+    description: Configuration for document analyzer agent
+    properties:
+      database:
+        type: string
+        description: RAG database name to query documents from
+      retrieval_strategy:
+        type: string
+        description: Retrieval strategy name
+        default: basic_search
+      max_context_length:
+        type: integer
+        description: Maximum context length for LLM processing
+        default: 50000
+      extraction_schema:
+        type: object
+        description: Pydantic schema for structured extraction (optional)
+        additionalProperties: true
+
+  # =============================================================================
+  # RAG Validator Configuration
+  # =============================================================================
+
+  ragValidatorConfig:
+    type: object
+    description: Configuration for RAG validator agent
+    properties:
+      database:
+        type: string
+        description: RAG database name to validate against
+      retrieval_strategy:
+        type: string
+        description: Retrieval strategy name
+        default: basic_search
+      top_k:
+        type: integer
+        description: Number of results to retrieve for validation
+        default: 5
+      confidence_threshold:
+        type: number
+        description: Minimum confidence score for validation
+        default: 0.7
+        minimum: 0.0
+        maximum: 1.0
+
+  # =============================================================================
+  # Report Generator Configuration
+  # =============================================================================
+
+  reportGeneratorConfig:
+    type: object
+    description: Configuration for report generator agent
+    properties:
+      format:
+        type: string
+        enum: [json, markdown, html, pdf]
+        description: Output format for reports
+        default: json
+      include_statistics:
+        type: boolean
+        description: Include statistics in reports
+        default: true
+      group_by:
+        type: array
+        description: Fields to group report data by
+        items:
+          type: string
+        default: []
+
+  # =============================================================================
+  # Workflow Orchestrator Configuration
+  # =============================================================================
+
+  workflowStep:
+    type: object
+    description: Single step in a workflow
+    properties:
+      agent:
+        type: string
+        description: Agent name to execute
+      input_field:
+        type: string
+        description: Input field name from previous step
+      output_field:
+        type: string
+        description: Output field name for this step
+    required:
+      - agent
+      - input_field
+      - output_field
+
+  workflowOrchestratorConfig:
+    type: object
+    description: Configuration for workflow orchestrator agent
+    properties:
+      batch_size:
+        type: integer
+        description: Number of items to process in each batch
+        default: 10
+      parallel_workers:
+        type: integer
+        description: Number of parallel workers for batch processing
+        default: 2
+      workflow:
+        type: array
+        description: Sequence of agent steps to execute
+        items:
+          $ref: '#/$defs/workflowStep'
+        default: []
