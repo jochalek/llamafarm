@@ -1,0 +1,167 @@
+# Agents Service API Schema
+# This schema defines the API request/response models for the agents service
+
+$schema: http://json-schema.org/draft-07/schema#
+
+$defs:
+  # =============================================================================
+  # Agent Run Request/Response
+  # =============================================================================
+
+  agentRunRequest:
+    type: object
+    description: Request to run an agent
+    required:
+      - namespace
+      - project
+      - agent_config
+      - project_config
+      - input_data
+    properties:
+      namespace:
+        type: string
+        description: Project namespace
+      project:
+        type: string
+        description: Project name
+      agent_config:
+        type: object
+        description: Agent configuration from llamafarm.yaml
+        additionalProperties: true
+      project_config:
+        type: object
+        description: Full project configuration
+        additionalProperties: true
+      input_data:
+        description: Input data for agent execution (any type)
+      stream:
+        type: boolean
+        description: Enable streaming response
+        default: false
+
+  agentRunResponse:
+    type: object
+    description: Response from agent execution
+    required:
+      - agent_name
+      - status
+    properties:
+      agent_name:
+        type: string
+        description: Name of the agent that was executed
+      status:
+        type: string
+        enum: [completed, failed]
+        description: Execution status
+      result:
+        description: Agent execution result (optional, null if failed)
+      error:
+        type: string
+        description: Error message if execution failed (optional)
+
+  # =============================================================================
+  # Agent Type Info
+  # =============================================================================
+
+  agentTypeInfo:
+    type: object
+    description: Information about an agent type
+    required:
+      - type
+    properties:
+      type:
+        type: string
+        description: Agent type identifier
+      class:
+        type: string
+        description: Python class name
+      module:
+        type: string
+        description: Python module path
+      has_factory:
+        type: boolean
+        description: Whether agent has a factory function
+        default: false
+
+  listAgentTypesResponse:
+    type: object
+    description: Response for listing available agent types
+    required:
+      - total
+      - types
+    properties:
+      total:
+        type: integer
+        description: Total number of agent types
+      types:
+        type: array
+        description: List of agent type information
+        items:
+          $ref: '#/$defs/agentTypeInfo'
+
+  # =============================================================================
+  # Health Check Models
+  # =============================================================================
+
+  healthCheckResponse:
+    type: object
+    description: Health check response
+    required:
+      - status
+      - service
+    properties:
+      status:
+        type: string
+        enum: [healthy, unhealthy]
+        description: Service health status
+      service:
+        type: string
+        description: Service name
+        default: llamafarm-agents
+      version:
+        type: string
+        description: Service version
+      agent_types_loaded:
+        type: integer
+        description: Number of agent types loaded
+      agent_types:
+        type: array
+        description: List of loaded agent types
+        items:
+          type: string
+      server_url:
+        type: string
+        description: Configured server URL
+
+  readinessCheckResponse:
+    type: object
+    description: Readiness check response
+    required:
+      - status
+    properties:
+      status:
+        type: string
+        enum: [ready, not_ready]
+        description: Service readiness status
+      agent_types:
+        type: integer
+        description: Number of agent types loaded
+      reason:
+        type: string
+        description: Reason for not ready status (optional)
+
+# Root model exports all API models
+type: object
+properties:
+  agentRunRequest:
+    $ref: '#/$defs/agentRunRequest'
+  agentRunResponse:
+    $ref: '#/$defs/agentRunResponse'
+  agentTypeInfo:
+    $ref: '#/$defs/agentTypeInfo'
+  listAgentTypesResponse:
+    $ref: '#/$defs/listAgentTypesResponse'
+  healthCheckResponse:
+    $ref: '#/$defs/healthCheckResponse'
+  readinessCheckResponse:
+    $ref: '#/$defs/readinessCheckResponse'
