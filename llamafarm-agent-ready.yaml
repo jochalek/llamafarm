@@ -180,6 +180,16 @@ rag:
       - '*.pdf'
       - '*.PDF'
       priority: 100
+    - type: TextParser_Python
+      config:
+        chunk_size: 50000
+        chunk_overlap: 0
+        chunk_strategy: sentences
+        extract_metadata: true
+      file_include_patterns:
+      - '*.txt'
+      - '*.TXT'
+      priority: 100
     extractors:
     - type: ContentStatisticsExtractor
       config:

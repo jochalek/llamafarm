@@ -22,7 +22,7 @@ NC='\033[0m' # No Color
 # Detect project root (directory containing this script)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SAMPLE_FILES="/Users/diegorey/Downloads/Test files"
+SAMPLE_FILES=""
 OUTPUT_DIR="/tmp/fda_batch_test"
 NAMESPACE="default"
 PROJECT="fda-demo-1"
@@ -70,17 +70,27 @@ while [[ $# -gt 0 ]]; do
             SKIP_PROCESSING=true
             shift
             ;;
+        --files-dir)
+            SAMPLE_FILES="$2"
+            shift 2
+            ;;
         --help)
             echo "FDA Batch Processing Setup Script"
             echo ""
             echo "Sets up RAG databases, uploads documents, and validates the system."
             echo "Run this before using fda_batch_process.sh for full batch processing."
             echo ""
-            echo "Usage: $0 [options]"
+            echo "Usage: $0 --files-dir <directory> [options]"
+            echo ""
+            echo "Required:"
+            echo "  --files-dir <path>   Directory containing FDA documents to process"
             echo ""
             echo "Options:"
             echo "  --skip-processing    Skip dataset upload and processing (use existing data)"
             echo "  --help               Show this help message"
+            echo ""
+            echo "Example:"
+            echo "  $0 --files-dir \"/Users/username/Downloads/Test files\""
             exit 0
             ;;
         *)
@@ -90,6 +100,23 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Validate required arguments
+if [[ -z "$SAMPLE_FILES" ]]; then
+    log_error "Missing required argument: --files-dir"
+    echo ""
+    echo "Usage: $0 --files-dir <directory> [options]"
+    echo "Example: $0 --files-dir \"/Users/username/Downloads/Test files\""
+    echo ""
+    echo "Use --help for more information"
+    exit 1
+fi
+
+# Validate directory exists
+if [[ ! -d "$SAMPLE_FILES" ]]; then
+    log_error "Directory does not exist: $SAMPLE_FILES"
+    exit 1
+fi
 
 # Cleanup function
 cleanup_on_error() {
