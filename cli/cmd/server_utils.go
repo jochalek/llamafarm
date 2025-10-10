@@ -426,6 +426,15 @@ func (so *ServiceOrchestrator) ensureService(serviceName string, requirement Ser
 		return so.waitForServiceRemote(serviceName, serviceDef, requirement)
 	}
 
+	// Step 2.5: Check if Docker starts are disabled via environment variable
+	if os.Getenv("LF_NO_DOCKER") != "" {
+		// Docker starts disabled - just wait for service to become available
+		if so.config.PrintStatus {
+			OutputProgress("Waiting for %s service (Docker auto-start disabled)...\n", serviceName)
+		}
+		return so.waitForServiceRemote(serviceName, serviceDef, requirement)
+	}
+
 	// Step 3: Local server - start service
 	if !serviceDef.CanStartLocally {
 		return &ServiceState{
