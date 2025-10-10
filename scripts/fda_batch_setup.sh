@@ -20,7 +20,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 PROJECT_ROOT="/Users/robthelen/llamafarm-1"
-SAMPLE_FILES="$PROJECT_ROOT/examples/rag_pipeline/sample_files/fda"
+SAMPLE_FILES="/Users/diegorey/Downloads/Test files"
 OUTPUT_DIR="/tmp/fda_batch_test"
 NAMESPACE="default"
 PROJECT="fda-demo-1"
