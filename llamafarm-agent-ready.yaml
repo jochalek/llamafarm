@@ -1,0 +1,471 @@
+version: v1
+name: fda-demo-1
+namespace: default
+prompts:
+- role: system
+  content: 'You are a helpful AI assistant. Your name is Pebbles.
+
+
+    CRITICAL RULES:
+
+    1. NEVER repeat the user''s question as your answer
+
+    2. ALWAYS provide a substantive, helpful response
+
+    3. If you don''t know something, say so clearly rather than repeating the question
+
+
+    When RAG context is provided, use it to enhance your answers.
+
+    When no context is available, use your general knowledge.
+
+
+    Remember: Your response must be different from the user''s input.
+
+    '
+rag:
+  databases:
+  - name: main_database
+    type: ChromaStore
+    config:
+      distance_function: cosine
+      collection_name: documents
+      port: 8000
+    embedding_strategies:
+    - name: default_embeddings
+      type: OllamaEmbedder
+      config:
+        base_url: http://localhost:11434
+        model: nomic-embed-text
+        dimension: 768
+        batch_size: 16
+        timeout: 60
+        auto_pull: true
+      priority: 0
+    retrieval_strategies:
+    - name: basic_search
+      type: BasicSimilarityStrategy
+      config:
+        distance_metric: cosine
+        top_k: 3
+      default: false
+    - name: filtered_search
+      type: MetadataFilteredStrategy
+      config:
+        top_k: 3
+        filter_mode: post
+        fallback_multiplier: 2
+      default: false
+    default_embedding_strategy: default_embeddings
+    default_retrieval_strategy: basic_search
+  - name: fda_letters_full
+    type: ChromaStore
+    config:
+      distance_function: cosine
+      collection_name: fda_letters_complete
+      port: 8000
+    embedding_strategies:
+    - name: default_embeddings
+      type: OllamaEmbedder
+      config:
+        base_url: http://localhost:11434
+        model: nomic-embed-text
+        dimension: 768
+        batch_size: 16
+        timeout: 60
+        auto_pull: true
+      priority: 0
+    retrieval_strategies:
+    - name: full_doc_retrieval
+      type: BasicSimilarityStrategy
+      config:
+        distance_metric: cosine
+        top_k: 1
+      default: true
+    default_embedding_strategy: default_embeddings
+    default_retrieval_strategy: full_doc_retrieval
+  - name: fda_corpus_chunked
+    type: ChromaStore
+    config:
+      distance_function: cosine
+      collection_name: fda_answers
+      port: 8000
+    embedding_strategies:
+    - name: default_embeddings
+      type: OllamaEmbedder
+      config:
+        base_url: http://localhost:11434
+        model: nomic-embed-text
+        dimension: 768
+        batch_size: 16
+        timeout: 60
+        auto_pull: true
+      priority: 0
+    retrieval_strategies:
+    - name: semantic_search
+      type: BasicSimilarityStrategy
+      config:
+        distance_metric: cosine
+        top_k: 3
+      default: true
+    default_embedding_strategy: default_embeddings
+    default_retrieval_strategy: semantic_search
+  - name: fda_letters_full_test
+    type: ChromaStore
+    config:
+      distance_function: cosine
+      collection_name: fda_letters_test_complete
+      port: 8000
+    embedding_strategies:
+    - name: default_embeddings
+      type: OllamaEmbedder
+      config:
+        base_url: http://localhost:11434
+        model: nomic-embed-text
+        dimension: 768
+        batch_size: 16
+        timeout: 60
+        auto_pull: true
+      priority: 0
+    retrieval_strategies:
+    - name: full_doc_retrieval
+      type: BasicSimilarityStrategy
+      config:
+        distance_metric: cosine
+        top_k: 1
+      default: true
+    default_embedding_strategy: default_embeddings
+    default_retrieval_strategy: full_doc_retrieval
+  - name: fda_corpus_chunked_test
+    type: ChromaStore
+    config:
+      distance_function: cosine
+      collection_name: fda_corpus_test_chunks
+      port: 8000
+    embedding_strategies:
+    - name: default_embeddings
+      type: OllamaEmbedder
+      config:
+        base_url: http://localhost:11434
+        model: nomic-embed-text
+        dimension: 768
+        batch_size: 16
+        timeout: 60
+        auto_pull: true
+      priority: 0
+    retrieval_strategies:
+    - name: semantic_search
+      type: BasicSimilarityStrategy
+      config:
+        distance_metric: cosine
+        top_k: 3
+      default: true
+    default_embedding_strategy: default_embeddings
+    default_retrieval_strategy: semantic_search
+  data_processing_strategies:
+  - name: fda_full_document_processor
+    description: Preserves complete FDA letters for question extraction
+    parsers:
+    - type: PDFParser_PyPDF2
+      config:
+        chunk_size: 50000
+        chunk_overlap: 0
+        chunk_strategy: paragraphs
+        extract_metadata: true
+        preserve_layout: true
+        combine_pages: false
+        extract_page_info: true
+        clean_text: true
+      file_include_patterns:
+      - '*.pdf'
+      - '*.PDF'
+      priority: 100
+    extractors:
+    - type: ContentStatisticsExtractor
+      config:
+        include_structure: true
+      file_include_patterns:
+      - '*'
+      priority: 100
+    - type: PatternExtractor
+      config:
+        custom_patterns:
+        - name: fda_question_markers
+          pattern: (?i)(please\s+(provide|submit|clarify|explain)|we\s+request|you\s+(must|should|are\s+required))
+          description: FDA question/request indicators
+      file_include_patterns:
+      - '*.pdf'
+      priority: 90
+  - name: fda_chunked_processor
+    description: Chunk documents for semantic search
+    parsers:
+    - type: PDFParser_PyPDF2
+      config:
+        chunk_size: 1500
+        chunk_overlap: 200
+        chunk_strategy: paragraphs
+        extract_metadata: true
+        preserve_layout: true
+        combine_pages: false
+        extract_page_info: true
+      file_include_patterns:
+      - '*.pdf'
+      - '*.PDF'
+      priority: 100
+    - type: DocxParser_LlamaIndex
+      config:
+        chunk_size: 1500
+        chunk_overlap: 200
+        extract_metadata: true
+        extract_tables: true
+      file_include_patterns:
+      - '*.docx'
+      - '*.DOCX'
+      priority: 100
+    - type: TextParser_Python
+      config:
+        chunk_size: 1500
+        chunk_overlap: 200
+        chunk_strategy: sentences
+        extract_metadata: true
+      file_include_patterns:
+      - '*.txt'
+      priority: 100
+    extractors:
+    - type: KeywordExtractor
+      config:
+        algorithm: rake
+        max_keywords: 15
+      file_include_patterns:
+      - '*'
+      priority: 100
+    - type: ContentStatisticsExtractor
+      config:
+        include_readability: true
+      file_include_patterns:
+      - '*'
+      priority: 90
+agents:
+- name: test_analyzer
+  type: document_analyzer
+  model: fast
+  description: Test document analyzer for extracting information
+  system_prompt: You are a document analysis expert. Extract key information from
+    documents.
+  config:
+    database: main_database_demo1
+    retrieval_strategy: basic_search
+    max_context_length: 10000
+- name: test_validator
+  type: rag_validator
+  model: fast
+  description: Test RAG validator for checking answers
+  config:
+    database: main_database_demo1
+    retrieval_strategy: basic_search
+    top_k: 5
+    confidence_threshold: 0.7
+- name: test_reporter
+  type: report_generator
+  model: fast
+  description: Test report generator
+  config:
+    format: json
+    include_statistics: true
+    group_by:
+    - status
+- name: test_workflow
+  type: workflow_orchestrator
+  model: fast
+  description: Test workflow that chains agents together
+  config:
+    batch_size: 5
+    parallel_workers: 2
+    workflow:
+    - agent: test_analyzer
+      input_field: input
+      output_field: analyzed_data
+    - agent: test_validator
+      input_field: analyzed_data
+      output_field: validated_data
+    - agent: test_reporter
+      input_field: validated_data
+      output_field: report
+- name: fda_document_analyzer
+  type: document_analyzer
+  model: balanced
+  description: Extracts questions from FDA deficiency letters
+  system_prompt: 'You are an FDA regulatory expert. Analyze the provided FDA letter
+    and extract all questions
+
+    or requests that the FDA asks. For each question:
+
+    - Extract the exact question text
+
+    - Note the document section or context
+
+    - Classify the type (safety, efficacy, manufacturing, etc.)
+
+    Return a structured list of questions.
+
+    '
+  config:
+    database: fda_letters_full
+    retrieval_strategy: full_doc_retrieval
+    max_context_length: 50000
+- name: fda_rag_validator
+  type: rag_validator
+  model: balanced
+  description: Validates if FDA questions are answered in response corpus
+  system_prompt: 'Given an FDA question and retrieved document chunks from the response
+    corpus,
+
+    determine if the question is adequately answered. Return:
+
+    - answered: true/false
+
+    - confidence: 0.0-1.0
+
+    - evidence: list of relevant document references
+
+    - summary: brief explanation
+
+    '
+  config:
+    database: fda_corpus_chunked
+    retrieval_strategy: semantic_search
+    top_k: 3
+    confidence_threshold: 0.7
+- name: fda_report_generator
+  type: report_generator
+  model: balanced
+  description: Generates FDA analysis report
+  config:
+    format: json
+    include_statistics: true
+    group_by:
+    - status
+    - question_type
+- name: fda_workflow
+  type: workflow_orchestrator
+  model: fast
+  description: Complete FDA document analysis workflow
+  config:
+    batch_size: 3
+    parallel_workers: 2
+    workflow:
+    - agent: fda_document_analyzer
+      input_field: input
+      output_field: questions
+    - agent: fda_rag_validator
+      input_field: questions
+      output_field: validations
+    - agent: fda_report_generator
+      input_field: validations
+      output_field: report
+- name: fda_question_extractor
+  type: fda_question_extractor
+  model: fast
+  description: Extracts and classifies FDA questions from correspondence
+  system_prompt: ''
+  config:
+    database: fda_letters_full
+    min_confidence: 0.85
+    extract_informal: true
+- name: fda_answer_validator
+  type: fda_answer_validator
+  model: fast
+  description: Validates FDA question answers with recursive verification
+  system_prompt: ''
+  config:
+    database: fda_corpus_chunked
+    retrieval_strategy: semantic_search
+    top_k: 3
+    confidence_threshold: 0.75
+    max_recursion_depth: 0
+- name: fda_batch_orchestrator
+  type: fda_batch_orchestrator
+  model: fast
+  description: Batch processes 500+ FDA documents
+  system_prompt: ''
+  config:
+    batch_size: 10
+    output_path: /tmp/fda_batch
+    resume_on_failure: true
+    extractor_config:
+      database: fda_letters_full
+      min_confidence: 0.85
+    validator_config:
+      database: fda_corpus_chunked
+      top_k: 3
+      confidence_threshold: 0.75
+datasets:
+- name: default
+  data_processing_strategy: universal_processor
+  database: main_database
+  files: []
+- name: fda_letters_test
+  data_processing_strategy: fda_full_document_processor
+  database: fda_letters_full_test
+  files:
+  - 81abd139a97521c1e673d2b0c2bc9f701dd72d67edc3108f0d91e5750af6a3c5
+  - ad1def8bec11d53b8888e35561462045aad771804d10ef7b3bf697c667132bbe
+  - e9314cbe6375abc60d9611d5dc7039c8368ee66261afdd0945f2d7df2a5466ef
+  - bde348d1917c183095dc8845278b5ec79e43af6e6979acc31181317cb010bd64
+  - 06424700782729611450905bca50593931b2d76d032dc3513dc0610fd20a0dcc
+  - 81abd139a97521c1e673d2b0c2bc9f701dd72d67edc3108f0d91e5750af6a3c5
+  - ad1def8bec11d53b8888e35561462045aad771804d10ef7b3bf697c667132bbe
+  - e9314cbe6375abc60d9611d5dc7039c8368ee66261afdd0945f2d7df2a5466ef
+  - bde348d1917c183095dc8845278b5ec79e43af6e6979acc31181317cb010bd64
+  - 06424700782729611450905bca50593931b2d76d032dc3513dc0610fd20a0dcc
+  - 81abd139a97521c1e673d2b0c2bc9f701dd72d67edc3108f0d91e5750af6a3c5
+  - ad1def8bec11d53b8888e35561462045aad771804d10ef7b3bf697c667132bbe
+  - e9314cbe6375abc60d9611d5dc7039c8368ee66261afdd0945f2d7df2a5466ef
+  - bde348d1917c183095dc8845278b5ec79e43af6e6979acc31181317cb010bd64
+  - 06424700782729611450905bca50593931b2d76d032dc3513dc0610fd20a0dcc
+- name: fda_corpus_test
+  data_processing_strategy: fda_chunked_processor
+  database: fda_corpus_chunked_test
+  files:
+  - 81abd139a97521c1e673d2b0c2bc9f701dd72d67edc3108f0d91e5750af6a3c5
+  - ad1def8bec11d53b8888e35561462045aad771804d10ef7b3bf697c667132bbe
+  - e9314cbe6375abc60d9611d5dc7039c8368ee66261afdd0945f2d7df2a5466ef
+  - bde348d1917c183095dc8845278b5ec79e43af6e6979acc31181317cb010bd64
+  - 06424700782729611450905bca50593931b2d76d032dc3513dc0610fd20a0dcc
+runtime:
+  default_model: fast
+  models:
+  - name: fast
+    description: Fast Qwen3-4B Instruct model (Q4 quantization, no thinking)
+    provider: ollama
+    model: qwen3-4b-instruct
+    base_url: http://localhost:11434/v1
+    prompt_format: unstructured
+    provider_config: {}
+  - name: lemon
+    description: Lemonade runtime with Qwen model
+    provider: lemonade
+    model: Qwen3-0.6B-GGUF
+    provider_config:
+      backend: llamacpp
+      port: 11534
+      context_size: 32768
+      auto_download: false
+  - name: balanced
+    description: Balanced Lemonade model for FDA analysis (4B)
+    provider: lemonade
+    model: user.Qwen3-4B-GGUF
+    provider_config:
+      backend: llamacpp
+      port: 11536
+      context_size: 32768
+      auto_download: false
+  - name: lemon_fast
+    description: Lemonade runtime with Qwen model
+    provider: lemonade
+    model: Qwen2.5-VL-7B-Instruct-GGUF
+    provider_config:
+      backend: llamacpp
+      port: 11535
+      context_size: 32768
+      auto_download: false
