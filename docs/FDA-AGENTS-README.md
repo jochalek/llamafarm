@@ -4,6 +4,134 @@
 
 The FDA agents system automatically analyzes FDA correspondence to extract questions/requests and validate if they've been answered in your response documents.
 
+## Prerequisites
+
+### macOS Setup
+
+Before using the FDA agents system, ensure you have the required tools installed:
+
+#### 1. Install Homebrew (if not already installed)
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+#### 2. Install Go
+```bash
+# Install Go via Homebrew
+brew install go
+
+# Verify installation
+go version
+```
+
+#### 3. Install UV (Python package manager)
+```bash
+# Install UV via Homebrew
+brew install uv
+
+# Verify installation
+uv --version
+```
+
+#### 4. Install Node.js and Nx
+```bash
+# Install Node.js via Homebrew
+brew install node
+
+# Install Nx globally
+npm install -g nx
+
+# Verify installations
+node --version
+npm --version
+nx --version
+```
+
+#### 5. Install Ollama (for embeddings)
+```bash
+# Install Ollama via Homebrew
+brew install ollama
+
+# Start Ollama service
+ollama serve &
+
+# Pull required embedding model
+ollama pull nomic-embed-text
+
+# Verify installation
+ollama list
+```
+
+#### 6. Install Docker Desktop (for services)
+```bash
+# Install Docker via Homebrew
+brew install --cask docker
+
+# Open Docker Desktop app to complete setup
+open -a Docker
+
+# Verify installation (after Docker Desktop starts)
+docker --version
+docker-compose --version
+```
+
+#### 7. Clone and Setup LlamaFarm
+```bash
+# Clone repository
+git clone https://github.com/llama-farm/llamafarm.git
+cd llamafarm
+
+# Install Python dependencies
+uv sync
+
+# Build CLI
+cd cli && go build -o lf . && cd ..
+
+# Copy CLI to path (optional)
+sudo cp cli/lf /usr/local/bin/
+
+# Verify CLI installation
+./cli/lf --version
+```
+
+#### 8. Start Required Services
+```bash
+# Terminal 1 - Server
+nx start server
+
+# Terminal 2 - RAG Worker
+nx start rag
+
+# Terminal 3 - Agents Service
+nx start agents
+
+# Verify services are running
+curl http://localhost:8000/health   # Server
+curl http://localhost:8003/health/  # Agents (note trailing slash)
+```
+
+### Quick Verification
+
+Check that all prerequisites are installed:
+
+```bash
+# Check all tools
+command -v brew && echo "✓ Homebrew installed"
+command -v go && echo "✓ Go installed"
+command -v uv && echo "✓ UV installed"
+command -v node && echo "✓ Node.js installed"
+command -v nx && echo "✓ Nx installed"
+command -v ollama && echo "✓ Ollama installed"
+command -v docker && echo "✓ Docker installed"
+
+# Check services
+curl -s http://localhost:8000/health && echo "✓ Server running"
+curl -s http://localhost:8003/health/ && echo "✓ Agents running"
+ollama list | grep nomic-embed-text && echo "✓ Embedding model ready"
+```
+
+If any checks fail, review the installation steps above.
+
 ## How It Works
 
 ```
