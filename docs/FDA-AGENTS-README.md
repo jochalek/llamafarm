@@ -95,7 +95,13 @@ sudo cp cli/lf /usr/local/bin/
 ```
 
 #### 8. Start Required Services
+
+**Option A: Using Nx (Recommended for Development)**
+
 ```bash
+# Disable Docker auto-start (important!)
+export LF_NO_DOCKER=1
+
 # Terminal 1 - Server
 nx start server
 
@@ -109,6 +115,16 @@ nx start agents
 curl http://localhost:8000/health   # Server
 curl http://localhost:8003/health/  # Agents (note trailing slash)
 ```
+
+**Option B: Using Docker (Alternative)**
+
+```bash
+# Don't set LF_NO_DOCKER
+# CLI will auto-start Docker containers when needed
+./lf start
+```
+
+**Important:** If running services via `nx start`, always set `export LF_NO_DOCKER=1` to prevent the CLI from trying to start Docker containers and conflicting with your running services.
 
 ### Quick Verification
 
