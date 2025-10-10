@@ -41,6 +41,9 @@ $defs:
       - rag_validator
       - report_generator
       - workflow_orchestrator
+      - fda_question_extractor
+      - fda_answer_validator
+      - fda_batch_orchestrator
     description: Type of agent
 
   # =============================================================================
@@ -157,3 +160,82 @@ $defs:
         items:
           $ref: '#/$defs/workflowStep'
         default: []
+
+  # =============================================================================
+  # FDA Question Extractor Configuration
+  # =============================================================================
+
+  fdaQuestionExtractorConfig:
+    type: object
+    description: Configuration for FDA question extractor agent
+    properties:
+      database:
+        type: string
+        description: RAG database with full FDA documents
+      min_confidence:
+        type: number
+        description: Minimum confidence threshold for extracted questions
+        default: 0.7
+        minimum: 0.0
+        maximum: 1.0
+      extract_informal:
+        type: boolean
+        description: Whether to extract administrative/informal questions
+        default: true
+
+  # =============================================================================
+  # FDA Answer Validator Configuration
+  # =============================================================================
+
+  fdaAnswerValidatorConfig:
+    type: object
+    description: Configuration for FDA answer validator agent
+    properties:
+      database:
+        type: string
+        description: RAG database with response documents
+      retrieval_strategy:
+        type: string
+        description: Retrieval strategy name
+        default: semantic_search
+      top_k:
+        type: integer
+        description: Number of chunks to retrieve
+        default: 10
+      confidence_threshold:
+        type: number
+        description: Minimum confidence for answered status
+        default: 0.75
+        minimum: 0.0
+        maximum: 1.0
+      max_recursion_depth:
+        type: integer
+        description: Maximum recursive verification attempts
+        default: 2
+        minimum: 0
+        maximum: 5
+
+  # =============================================================================
+  # FDA Batch Orchestrator Configuration
+  # =============================================================================
+
+  fdaBatchOrchestratorConfig:
+    type: object
+    description: Configuration for FDA batch orchestrator agent
+    properties:
+      batch_size:
+        type: integer
+        description: Documents per batch
+        default: 10
+      output_path:
+        type: string
+        description: Where to save progress and reports
+        default: /tmp/fda_batch
+      resume_on_failure:
+        type: boolean
+        description: Continue from last checkpoint
+        default: true
+      extractor_config:
+        $ref: '#/$defs/fdaQuestionExtractorConfig'
+      validator_config:
+        $ref: '#/$defs/fdaAnswerValidatorConfig'

@@ -20,12 +20,12 @@ class ServerClient:
     - Project configuration endpoints
     """
 
-    def __init__(self, server_url: str, timeout: int = 120):
+    def __init__(self, server_url: str, timeout: int = 300):
         """Initialize server client.
 
         Args:
             server_url: Base URL of LlamaFarm server (e.g., http://localhost:8000)
-            timeout: Request timeout in seconds
+            timeout: Request timeout in seconds (default 300 = 5 minutes for LLM processing)
         """
         self.server_url = server_url.rstrip("/")
         self.client = httpx.AsyncClient(timeout=timeout)
@@ -136,11 +136,14 @@ class ServerClient:
             f"messages={len(messages)}"
         )
 
+        # Use X-No-Session header to bypass project prompt and use our system message
+        headers = {"X-No-Session": "true"}
+
         if stream:
-            return self._stream_chat(url, payload)
+            return self._stream_chat(url, payload, headers)
         else:
             try:
-                response = await self.client.post(url, json=payload)
+                response = await self.client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
@@ -148,7 +151,7 @@ class ServerClient:
                 raise
 
     async def _stream_chat(
-        self, url: str, payload: dict
+        self, url: str, payload: dict, headers: dict = None
     ) -> AsyncGenerator[str, None]:
         """Stream chat completions.
 

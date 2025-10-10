@@ -287,8 +287,25 @@ async def chat(
 
     if stateless:
         # Stateless mode: create throwaway agent without session or persistence
+        # Check if request contains system message - if so, override project prompts
+        request_system_message = next(
+            (msg for msg in request.messages if msg.role == "system"),
+            None
+        )
+
+        config_to_use = project_config
+        if request_system_message:
+            # Create modified config with request's system prompt instead of project's
+            import copy
+            from config.datamodel import Prompt
+
+            config_to_use = copy.deepcopy(project_config)
+            config_to_use.prompts = [
+                Prompt(role="system", content=request_system_message.content)
+            ]
+
         agent = ProjectChatOrchestratorAgentFactory.create_agent(
-            project_config, project_dir=project_dir, model_name=request.model
+            config_to_use, project_dir=project_dir, model_name=request.model
         )
     else:
         # Stateful mode: use or create cached agent with disk-persisted history
