@@ -245,14 +245,89 @@ rag:
       # Strategy: Chunked for semantic search
 ```
 
-## Usage
+## Getting Started
 
-### Via CLI
+### Step 1: Setup (One-Time)
+
+Before running batch processing, set up your databases and upload documents:
+
 ```bash
-# Run batch processing
+# Full setup with document processing
+./scripts/fda_batch_setup.sh
+
+# Or skip processing if datasets already exist
+./scripts/fda_batch_setup.sh --skip-processing
+```
+
+**What this does:**
+- ✅ Verifies services are running
+- ✅ Creates `fda_letters_test` dataset (full documents)
+- ✅ Creates `fda_corpus_test` dataset (chunked for answers)
+- ✅ Uploads all documents from sample directory
+- ✅ Processes documents into vector databases
+- ✅ Tests individual agents (extractor + validator)
+- ✅ Validates system health
+
+### Step 2: Process Documents
+
+Run batch processing on all documents:
+
+```bash
+# Process all documents with default settings
 ./scripts/fda_batch_process.sh
 
-# Or via agents API
+# Custom batch size and model
+./scripts/fda_batch_process.sh --batch-size 10 --model balanced
+
+# Custom output directory
+./scripts/fda_batch_process.sh --output-dir /data/fda_results
+```
+
+**Available options:**
+- `--namespace NS` - Project namespace (default: default)
+- `--project PROJ` - Project name (default: fda-demo-1)
+- `--batch-size N` - Documents per batch (default: 5)
+- `--output-dir DIR` - Output directory (default: /tmp/fda_batch)
+- `--model MODEL` - Model to use (default: fast, options: fast, balanced)
+
+### Step 3: Control & Monitor
+
+Control running batch jobs:
+
+```bash
+# Check current batch status
+./scripts/fda_batch_control.sh status
+
+# Stop batch gracefully (completes current document)
+./scripts/fda_batch_control.sh stop
+
+# Resume stopped batch from last checkpoint
+./scripts/fda_batch_control.sh resume
+
+# List all batch results
+./scripts/fda_batch_control.sh results
+
+# Clean up batch state (WARNING: cannot resume after this)
+./scripts/fda_batch_control.sh clean
+```
+
+## Usage
+
+### Via CLI Scripts (Recommended)
+```bash
+# Setup (one-time)
+./scripts/fda_batch_setup.sh
+
+# Process all documents
+./scripts/fda_batch_process.sh
+
+# Monitor progress
+./scripts/fda_batch_control.sh status
+```
+
+### Via Agents API (Advanced)
+```bash
+# Or via agents API directly
 ./lf agents run fda_batch_orchestrator --input-file batch_request.json
 ```
 
