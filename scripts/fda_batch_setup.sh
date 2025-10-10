@@ -19,7 +19,9 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
-PROJECT_ROOT="/Users/robthelen/llamafarm-1"
+# Detect project root (directory containing this script)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SAMPLE_FILES="/Users/diegorey/Downloads/Test files"
 OUTPUT_DIR="/tmp/fda_batch_test"
 NAMESPACE="default"
