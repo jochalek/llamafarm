@@ -311,7 +311,7 @@ runtime:
       prompts: [default]
       transformers:
         device: auto
-        torch_dtype: auto
+        dtype: auto
         trust_remote_code: true
         model_type: image
       diffusion:
@@ -330,7 +330,7 @@ runtime:
       prompts: [default]
       transformers:
         device: auto
-        torch_dtype: auto
+        dtype: auto
         trust_remote_code: true
         model_type: image
       diffusion:
@@ -349,7 +349,7 @@ runtime:
       prompts: [default]
       transformers:
         device: auto
-        torch_dtype: auto
+        dtype: auto
         trust_remote_code: true
         model_type: image
       diffusion:
@@ -368,7 +368,7 @@ runtime:
       prompts: [default]
       transformers:
         device: auto
-        torch_dtype: auto
+        dtype: auto
         trust_remote_code: true
         model_type: image
       diffusion:

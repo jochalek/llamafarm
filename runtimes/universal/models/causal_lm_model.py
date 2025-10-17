@@ -1,5 +1,5 @@
 """
-Text generation model wrapper.
+Causal language model wrapper for text generation.
 """
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -12,37 +12,37 @@ from .base import BaseModel
 logger = logging.getLogger(__name__)
 
 
-class TextModel(BaseModel):
-    """Wrapper for HuggingFace text generation models."""
+class CausalLMModel(BaseModel):
+    """Wrapper for HuggingFace causal language models (GPT-style text generation)."""
 
     def __init__(self, model_id: str, device: str):
         super().__init__(model_id, device)
-        self.model_type = "text"
+        self.model_type = "causal_lm"
+        self.supports_streaming = False  # TODO: Implement streaming
 
     async def load(self):
-        """Load the text generation model."""
-        logger.info(f"Loading text model: {self.model_id}")
+        """Load the causal language model."""
+        logger.info(f"Loading causal LM: {self.model_id}")
 
-        torch_dtype = self.get_torch_dtype()
+        dtype = self.get_dtype()
 
         # Load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_id,
-            trust_remote_code=True
+            self.model_id, trust_remote_code=True
         )
 
         # Load model
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_id,
-            torch_dtype=torch_dtype,
+            dtype=dtype,
             trust_remote_code=True,
-            device_map="auto" if self.device == "cuda" else None
+            device_map="auto" if self.device == "cuda" else None,
         )
 
         if self.device != "cuda":
             self.model = self.model.to(self.device)
 
-        logger.info(f"Text model loaded on {self.device}")
+        logger.info(f"Causal LM loaded on {self.device}")
 
     def format_messages(self, messages: List[dict]) -> str:
         """Format chat messages into a prompt."""
@@ -50,9 +50,7 @@ class TextModel(BaseModel):
         if hasattr(self.tokenizer, "apply_chat_template"):
             try:
                 return self.tokenizer.apply_chat_template(
-                    messages,
-                    tokenize=False,
-                    add_generation_prompt=True
+                    messages, tokenize=False, add_generation_prompt=True
                 )
             except Exception:
                 pass
@@ -73,7 +71,7 @@ class TextModel(BaseModel):
         max_tokens: Optional[int] = None,
         temperature: float = 1.0,
         top_p: float = 1.0,
-        stop: Optional[List[str]] = None
+        stop: Optional[List[str]] = None,
     ) -> str:
         """Generate text completion."""
 
@@ -88,13 +86,12 @@ class TextModel(BaseModel):
                 temperature=temperature,
                 top_p=top_p,
                 do_sample=temperature > 0,
-                pad_token_id=self.tokenizer.eos_token_id
+                pad_token_id=self.tokenizer.eos_token_id,
             )
 
         # Decode only the new tokens
         generated_text = self.tokenizer.decode(
-            outputs[0][inputs.input_ids.shape[1]:],
-            skip_special_tokens=True
+            outputs[0][inputs.input_ids.shape[1] :], skip_special_tokens=True
         )
 
         return generated_text.strip()

@@ -1,9 +1,9 @@
 """
-Base model class for all transformers models.
+Base model class for all HuggingFace models (transformers & diffusers).
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 import torch
 import logging
 
@@ -11,27 +11,34 @@ logger = logging.getLogger(__name__)
 
 
 class BaseModel(ABC):
-    """Base class for all model types."""
+    """Base class for all model types (transformers, diffusers, etc.)."""
 
     def __init__(self, model_id: str, device: str):
         self.model_id = model_id
         self.device = device
         self.model = None
         self.tokenizer = None
-        self.pipe = None
+        self.processor = None  # For vision/audio models
+        self.feature_extractor = None  # For audio models
+        self.pipe = None  # For diffusion models
         self.model_type = "unknown"
+        self.supports_streaming = False
 
     @abstractmethod
     async def load(self):
-        """Load the model."""
+        """Load the model and associated components."""
         pass
 
-    @abstractmethod
-    async def generate(self, *args, **kwargs):
-        """Generate output."""
-        pass
+    def get_model_info(self) -> Dict[str, Any]:
+        """Get information about the loaded model."""
+        return {
+            "model_id": self.model_id,
+            "model_type": self.model_type,
+            "device": self.device,
+            "supports_streaming": self.supports_streaming,
+        }
 
-    def get_torch_dtype(self):
+    def get_dtype(self):
         """Get optimal torch dtype for the device."""
         if self.device == "cuda":
             return torch.float16

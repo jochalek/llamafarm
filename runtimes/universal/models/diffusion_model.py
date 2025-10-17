@@ -1,5 +1,5 @@
 """
-Image generation model wrapper.
+Diffusion model wrapper for image generation.
 """
 
 from diffusers import (
@@ -13,7 +13,7 @@ from diffusers import (
     LMSDiscreteScheduler,
     EulerAncestralDiscreteScheduler,
     EulerDiscreteScheduler,
-    DPMSolverMultistepScheduler
+    DPMSolverMultistepScheduler,
 )
 import torch
 from typing import List, Optional
@@ -26,20 +26,20 @@ from .base import BaseModel
 logger = logging.getLogger(__name__)
 
 
-class ImageModel(BaseModel):
-    """Wrapper for HuggingFace diffusion models."""
+class DiffusionModel(BaseModel):
+    """Wrapper for HuggingFace diffusion models (Stable Diffusion, FLUX, etc.)."""
 
     def __init__(self, model_id: str, device: str):
         super().__init__(model_id, device)
-        self.model_type = "image"
+        self.model_type = "diffusion"
         self.default_steps = 50
         self.default_guidance = 7.5
 
     async def load(self):
         """Load the diffusion model."""
-        logger.info(f"Loading image model: {self.model_id}")
+        logger.info(f"Loading diffusion model: {self.model_id}")
 
-        torch_dtype = self.get_torch_dtype()
+        dtype = self.get_dtype()
 
         # Determine pipeline type based on model
         if "inpaint" in self.model_id.lower():
@@ -55,22 +55,22 @@ class ImageModel(BaseModel):
         try:
             self.pipe = pipeline_class.from_pretrained(
                 self.model_id,
-                torch_dtype=torch_dtype,
+                dtype=dtype,
                 trust_remote_code=True,
                 use_safetensors=True,
                 safety_checker=None,
-                requires_safety_checker=False
+                requires_safety_checker=False,
             )
         except (OSError, ValueError) as e:
             if "safetensors" in str(e).lower():
                 logger.info("Model doesn't have safetensors, using standard weights")
                 self.pipe = pipeline_class.from_pretrained(
                     self.model_id,
-                    torch_dtype=torch_dtype,
+                    dtype=dtype,
                     trust_remote_code=True,
                     use_safetensors=False,
                     safety_checker=None,
-                    requires_safety_checker=False
+                    requires_safety_checker=False,
                 )
             else:
                 raise
@@ -80,7 +80,7 @@ class ImageModel(BaseModel):
         # Apply optimizations
         self.apply_optimizations()
 
-        logger.info(f"Image model loaded on {self.device}")
+        logger.info(f"Diffusion model loaded on {self.device}")
 
     def _get_scheduler(self, scheduler_name: Optional[str] = None):
         """Get scheduler by name."""
@@ -93,7 +93,7 @@ class ImageModel(BaseModel):
             "lms": LMSDiscreteScheduler,
             "euler": EulerDiscreteScheduler,
             "euler_a": EulerAncestralDiscreteScheduler,
-            "dpm++": DPMSolverMultistepScheduler
+            "dpm++": DPMSolverMultistepScheduler,
         }
 
         scheduler_class = scheduler_map.get(scheduler_name.lower())
@@ -112,7 +112,7 @@ class ImageModel(BaseModel):
         num_inference_steps: Optional[int] = None,
         guidance_scale: Optional[float] = None,
         seed: Optional[int] = None,
-        scheduler: Optional[str] = None
+        scheduler: Optional[str] = None,
     ) -> List[Image.Image]:
         """Generate images from text prompt."""
 
@@ -142,7 +142,7 @@ class ImageModel(BaseModel):
                 height=height,
                 num_inference_steps=steps,
                 guidance_scale=guidance,
-                generator=generator
+                generator=generator,
             )
 
         return result.images
@@ -156,7 +156,7 @@ class ImageModel(BaseModel):
         num_images: int = 1,
         num_inference_steps: Optional[int] = None,
         guidance_scale: Optional[float] = None,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
     ) -> List[Image.Image]:
         """Edit/inpaint an image."""
 
@@ -169,7 +169,9 @@ class ImageModel(BaseModel):
         # If no mask provided, inpainting won't work properly - it needs a mask
         # For now, raise an error to indicate proper mask is required
         if mask is None:
-            raise ValueError("Inpainting requires a mask. Please provide a mask image or use a different model/endpoint.")
+            raise ValueError(
+                "Inpainting requires a mask. Please provide a mask image or use a different model/endpoint."
+            )
 
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
@@ -185,7 +187,7 @@ class ImageModel(BaseModel):
                 num_images_per_prompt=num_images,
                 num_inference_steps=steps,
                 guidance_scale=guidance,
-                generator=generator
+                generator=generator,
             )
 
         return result.images
@@ -200,33 +202,33 @@ class ImageModel(BaseModel):
         guidance_scale: Optional[float] = None,
         strength: float = 0.75,
         seed: Optional[int] = None,
-        scheduler: Optional[str] = None
+        scheduler: Optional[str] = None,
     ) -> List[Image.Image]:
         """Transform an image based on a text prompt (img2img)."""
 
         # Load img2img pipeline if not already loaded
-        if not hasattr(self, 'img2img_pipe'):
+        if not hasattr(self, "img2img_pipe"):
             logger.info(f"Loading img2img pipeline for {self.model_id}")
-            torch_dtype = self.get_torch_dtype()
+            dtype = self.get_dtype()
 
             try:
                 self.img2img_pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
                     self.model_id,
-                    torch_dtype=torch_dtype,
+                    dtype=dtype,
                     trust_remote_code=True,
                     use_safetensors=True,
                     safety_checker=None,
-                    requires_safety_checker=False
+                    requires_safety_checker=False,
                 )
             except (OSError, ValueError) as e:
                 if "safetensors" in str(e).lower():
                     self.img2img_pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
                         self.model_id,
-                        torch_dtype=torch_dtype,
+                        dtype=dtype,
                         trust_remote_code=True,
                         use_safetensors=False,
                         safety_checker=None,
-                        requires_safety_checker=False
+                        requires_safety_checker=False,
                     )
                 else:
                     raise
@@ -262,7 +264,7 @@ class ImageModel(BaseModel):
                 num_inference_steps=steps,
                 guidance_scale=guidance,
                 strength=strength,
-                generator=generator
+                generator=generator,
             )
 
         return result.images

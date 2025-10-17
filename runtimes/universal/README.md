@@ -254,14 +254,14 @@ transformers/
 ├── models/
 │   ├── base.py          # Base model class
 │   ├── text_model.py    # Text generation wrapper
-│   └── image_model.py   # Image generation wrapper
+│   └── diffusion_model.py   # Diffusion model wrapper (Stable Diffusion, FLUX, etc.)
 ├── utils/
 │   ├── device.py        # Device detection (MPS/CUDA/CPU)
 │   └── file_utils.py    # File I/O helpers
 └── tests/
     ├── test_server.py
     ├── test_text_models.py
-    └── test_image_models.py
+    └── test_diffusion_models.py
 ```
 
 ## Resources
