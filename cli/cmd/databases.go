@@ -32,6 +32,7 @@ Each database must specify:
 
 Available commands:
   list    - List all databases for a project
+  metrics - Show database metrics (documents, embeddings, size)
   delete  - Delete a database (soft delete keeps data, hard delete removes everything)
   clear   - Clear database data but keep configuration`,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -67,6 +68,17 @@ type deleteDatabaseResponse struct {
 type clearDatabaseResponse struct {
 	Database apiDatabase `json:"database"`
 	Message  string      `json:"message"`
+}
+
+type databaseMetrics struct {
+	DatabaseName               string  `json:"database_name"`
+	DatabaseType               string  `json:"database_type"`
+	TotalDocuments             int     `json:"total_documents"`
+	DocumentsWithEmbeddings    int     `json:"documents_with_embeddings"`
+	DocumentsWithoutEmbeddings int     `json:"documents_without_embeddings"`
+	EmbeddingDimension         *int    `json:"embedding_dimension"`
+	CollectionSizeBytes        *int64  `json:"collection_size_bytes"`
+	CollectionName             *string `json:"collection_name"`
 }
 
 // databasesListCmd represents the databases list command
@@ -273,6 +285,121 @@ Examples:
 	},
 }
 
+// databasesMetricsCmd represents the databases metrics command
+var databasesMetricsCmd = &cobra.Command{
+	Use:   "metrics [name]",
+	Short: "Show metrics for a database (documents, embeddings, size)",
+	Long: `Display detailed metrics for a database to verify embeddings are working.
+
+Metrics include:
+  - Total document count
+  - Documents with embeddings vs without embeddings
+  - Embedding dimensions
+  - Collection size on disk
+
+This is useful for verifying that:
+  - Documents are being processed
+  - Embeddings are being generated
+  - The database is not empty
+
+Examples:
+  lf databases metrics main_database`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		// Start config watcher for this command
+		StartConfigWatcherForCommand()
+
+		serverCfg, err := config.GetServerConfig(getEffectiveCWD(), serverURL, namespace, projectID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		databaseName := args[0]
+
+		// Ensure server is up
+		config := ServerOnlyConfig(serverCfg.URL)
+		EnsureServicesWithConfig(config)
+
+		url := buildServerURL(serverCfg.URL, fmt.Sprintf("/v1/projects/%s/%s/rag/databases/%s/metrics",
+			serverCfg.Namespace, serverCfg.Project, databaseName))
+
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating request: %v\n", err)
+			os.Exit(1)
+		}
+		resp, err := getHTTPClient().Do(req)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error sending request: %v\n", err)
+			os.Exit(1)
+		}
+		defer resp.Body.Close()
+		body, readErr := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			if readErr != nil {
+				fmt.Fprintf(os.Stderr, "Failed to get metrics for database '%s' (%d), and body read failed: %v\n", databaseName, resp.StatusCode, readErr)
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stderr, "Failed to get metrics for database '%s' (%d): %s\n", databaseName, resp.StatusCode, prettyServerError(resp, body))
+			os.Exit(1)
+		}
+
+		var metrics databaseMetrics
+		if err := json.Unmarshal(body, &metrics); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed parsing response: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Display metrics
+		fmt.Printf("\n📊 Database Metrics: %s\n", metrics.DatabaseName)
+		fmt.Printf("─────────────────────────────────────────────\n\n")
+		fmt.Printf("Database Type:      %s\n", metrics.DatabaseType)
+		if metrics.CollectionName != nil {
+			fmt.Printf("Collection Name:    %s\n", *metrics.CollectionName)
+		}
+		fmt.Printf("\n📁 Documents:\n")
+		fmt.Printf("  Total:            %d\n", metrics.TotalDocuments)
+		fmt.Printf("  With Embeddings:  %d\n", metrics.DocumentsWithEmbeddings)
+		fmt.Printf("  Without:          %d\n", metrics.DocumentsWithoutEmbeddings)
+
+		if metrics.TotalDocuments > 0 {
+			pct := float64(metrics.DocumentsWithEmbeddings) / float64(metrics.TotalDocuments) * 100
+			fmt.Printf("  Coverage:         %.1f%%\n", pct)
+		}
+
+		if metrics.EmbeddingDimension != nil && *metrics.EmbeddingDimension > 0 {
+			fmt.Printf("\n🔢 Embeddings:\n")
+			fmt.Printf("  Dimension:        %d\n", *metrics.EmbeddingDimension)
+		}
+
+		if metrics.CollectionSizeBytes != nil && *metrics.CollectionSizeBytes > 0 {
+			fmt.Printf("\n💾 Storage:\n")
+			sizeKB := float64(*metrics.CollectionSizeBytes) / 1024
+			sizeMB := sizeKB / 1024
+			if sizeMB >= 1 {
+				fmt.Printf("  Collection Size:  %.2f MB\n", sizeMB)
+			} else {
+				fmt.Printf("  Collection Size:  %.2f KB\n", sizeKB)
+			}
+		}
+
+		fmt.Printf("\n")
+
+		// Show warnings if needed
+		if metrics.TotalDocuments == 0 {
+			fmt.Printf("⚠️  Warning: Database is empty. No documents have been processed.\n")
+		} else if metrics.DocumentsWithEmbeddings == 0 {
+			fmt.Printf("⚠️  Warning: No embeddings found! Embeddings may not be working.\n")
+			fmt.Printf("   Check that:\n")
+			fmt.Printf("   - Ollama is running (ollama serve)\n")
+			fmt.Printf("   - Embedding model is pulled (ollama pull nomic-embed-text)\n")
+			fmt.Printf("   - base_url is set correctly in llamafarm.yaml embedder config\n")
+		} else if metrics.DocumentsWithoutEmbeddings > 0 {
+			fmt.Printf("ℹ️  Note: %d documents don't have embeddings.\n", metrics.DocumentsWithoutEmbeddings)
+		}
+	},
+}
+
 func init() {
 	// Server routing flags (align with datasets)
 	databasesCmd.PersistentFlags().StringVar(&serverURL, "server-url", "", "LlamaFarm server URL (default: http://localhost:8000)")
@@ -284,6 +411,7 @@ func init() {
 
 	// Add subcommands to databases
 	databasesCmd.AddCommand(databasesListCmd)
+	databasesCmd.AddCommand(databasesMetricsCmd)
 	databasesCmd.AddCommand(databasesDeleteCmd)
 	databasesCmd.AddCommand(databasesClearCmd)
 

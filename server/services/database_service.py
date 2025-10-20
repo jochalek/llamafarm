@@ -13,6 +13,19 @@ from services.project_service import ProjectService
 logger = FastAPIStructLogger()
 
 
+class DatabaseMetrics(BaseModel):
+    """Metrics for a database"""
+
+    database_name: str
+    database_type: str
+    total_documents: int
+    documents_with_embeddings: int
+    documents_without_embeddings: int
+    embedding_dimension: int | None = None
+    collection_size_bytes: int | None = None
+    collection_name: str | None = None
+
+
 class DatabaseInfo(BaseModel):
     """Information about a database"""
 
@@ -306,3 +319,87 @@ class DatabaseService:
             f"Cleared data for database '{name}' in project {namespace}/{project}"
         )
         return database
+
+    @classmethod
+    def get_database_metrics(
+        cls, namespace: str, project: str, name: str
+    ) -> DatabaseMetrics:
+        """
+        Get metrics for a database (document count, embeddings, etc.)
+
+        This method uses the RAG store infrastructure to get metrics,
+        so it works with any database type defined in the config.
+
+        Args:
+            namespace: Project namespace
+            project: Project ID
+            name: Database name
+
+        Returns:
+            DatabaseMetrics: Metrics for the database
+
+        Raises:
+            NotFoundError: If database with given name is not found
+        """
+        database = cls.get_database(namespace, project, name)
+        project_config = ProjectService.load_config(namespace, project)
+        project_dir = ProjectService.get_project_dir(namespace, project)
+
+        # Initialize default metrics
+        metrics = DatabaseMetrics(
+            database_name=name,
+            database_type=str(database.type.value if hasattr(database.type, 'value') else database.type),
+            total_documents=0,
+            documents_with_embeddings=0,
+            documents_without_embeddings=0,
+        )
+
+        # Use the RAG store infrastructure to get metrics
+        try:
+            import sys
+            from pathlib import Path as PathLib
+
+            # Add RAG module to path
+            rag_path = PathLib(project_dir).parent.parent.parent / "rag"
+            if str(rag_path) not in sys.path:
+                sys.path.insert(0, str(rag_path))
+
+            from core.rag_pipeline import RAGPipeline
+
+            # Initialize RAG pipeline to get the store
+            rag_pipeline = RAGPipeline(
+                config=project_config,
+                project_dir=str(project_dir),
+                database_name=name
+            )
+
+            # Get the vector store
+            vector_store = rag_pipeline.vector_store
+
+            # Get metrics from the store
+            if hasattr(vector_store, 'get_metrics'):
+                # If store implements get_metrics, use it
+                store_metrics = vector_store.get_metrics()
+                metrics.total_documents = store_metrics.get('total_documents', 0)
+                metrics.documents_with_embeddings = store_metrics.get('documents_with_embeddings', 0)
+                metrics.documents_without_embeddings = store_metrics.get('documents_without_embeddings', 0)
+                metrics.embedding_dimension = store_metrics.get('embedding_dimension')
+                metrics.collection_size_bytes = store_metrics.get('collection_size_bytes')
+                metrics.collection_name = store_metrics.get('collection_name')
+            else:
+                # Fallback: try to get basic count
+                try:
+                    # Most stores should support some form of count/search
+                    results = vector_store.search(query_embedding=[0.0] * 768, top_k=10000)
+                    if results:
+                        metrics.total_documents = len(results)
+                        # Try to check if embeddings exist
+                        if hasattr(results[0], 'embedding') or (isinstance(results[0], dict) and 'embedding' in results[0]):
+                            metrics.documents_with_embeddings = len(results)
+                except Exception as e:
+                    logger.warning(f"Could not get basic metrics from store: {e}")
+
+        except Exception as e:
+            logger.error(f"Error getting database metrics: {e}")
+
+        return metrics

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from core.logging import FastAPIStructLogger
 from services.project_service import ProjectService
-from services.database_service import DatabaseService
+from services.database_service import DatabaseService, DatabaseMetrics
 from api.errors import NotFoundError
 from config.datamodel import DatabaseDefinition
 from .rag_query import QueryRequest, QueryResponse, handle_rag_query
@@ -266,4 +266,28 @@ async def clear_database(namespace: str, project: str, database: str):
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error clearing database: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/databases/{database}/metrics", response_model=DatabaseMetrics)
+async def get_database_metrics(namespace: str, project: str, database: str):
+    """
+    Get metrics for a database including document count and embedding status.
+
+    This helps verify that embeddings are working correctly by showing:
+    - Total document count
+    - Documents with embeddings vs without
+    - Embedding dimensions
+    - Collection size on disk
+    """
+    logger.bind(namespace=namespace, project=project, database=database)
+    try:
+        metrics = DatabaseService.get_database_metrics(
+            namespace=namespace, project=project, name=database
+        )
+        return metrics
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Error getting database metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

@@ -515,6 +515,70 @@ class ChromaStore(VectorStore):
             logger.error(f"Failed to get collection info: {e}")
             return {"error": str(e)}
 
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get database metrics including embedding status."""
+        try:
+            # Get all documents with embeddings
+            result = self.collection.get(include=["embeddings", "metadatas"])
+
+            if not result or not result.get("ids"):
+                return {
+                    "total_documents": 0,
+                    "documents_with_embeddings": 0,
+                    "documents_without_embeddings": 0,
+                    "embedding_dimension": None,
+                    "collection_size_bytes": None,
+                    "collection_name": self.collection_name,
+                }
+
+            total = len(result["ids"])
+            embeddings = result.get("embeddings", [])
+
+            with_embeddings = 0
+            embedding_dim = None
+
+            if embeddings:
+                for emb in embeddings:
+                    if emb and len(emb) > 0:
+                        # Check if it's not all zeros (actual embedding)
+                        if any(x != 0.0 for x in emb):
+                            with_embeddings += 1
+                            if embedding_dim is None:
+                                embedding_dim = len(emb)
+
+            # Calculate collection size if persist directory exists
+            collection_size = None
+            if self.persist_directory and Path(self.persist_directory).exists():
+                try:
+                    collection_path = Path(self.persist_directory) / self.collection_name
+                    if collection_path.exists():
+                        collection_size = sum(
+                            f.stat().st_size for f in collection_path.rglob('*') if f.is_file()
+                        )
+                except Exception as e:
+                    logger.warning(f"Could not calculate collection size: {e}")
+
+            return {
+                "total_documents": total,
+                "documents_with_embeddings": with_embeddings,
+                "documents_without_embeddings": total - with_embeddings,
+                "embedding_dimension": embedding_dim,
+                "collection_size_bytes": collection_size,
+                "collection_name": self.collection_name,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get metrics: {e}")
+            return {
+                "total_documents": 0,
+                "documents_with_embeddings": 0,
+                "documents_without_embeddings": 0,
+                "embedding_dimension": None,
+                "collection_size_bytes": None,
+                "collection_name": self.collection_name,
+                "error": str(e),
+            }
+
     @classmethod
     def get_description(cls) -> str:
         """Get store description."""
