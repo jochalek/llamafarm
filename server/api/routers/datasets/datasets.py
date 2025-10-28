@@ -777,15 +777,17 @@ async def get_dataset_info(
     """
     logger.bind(namespace=namespace, project=project, dataset=dataset)
 
-    # Get project directory
-    project_dir = ProjectService.get_project_directory(namespace, project)
+    # Get project and dataset configuration
+    project_obj = ProjectService.get_project(namespace, project)
+    project_dir = ProjectService.get_project_dir(namespace, project)
 
-    # Get dataset configuration
-    try:
-        dataset_config = DatasetService.get_dataset(namespace, project, dataset)
-    except Exception as e:
-        logger.error(f"Dataset not found: {e}")
-        raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found") from e
+    dataset_config = next(
+        (ds for ds in (project_obj.config.datasets or []) if ds.name == dataset),
+        None,
+    )
+
+    if dataset_config is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found")
 
     # Get processing history from existing logs
     processing_runs = ProcessingLogReader.get_dataset_history(
@@ -901,7 +903,7 @@ async def get_dataset_info(
         "database": dataset_config.database,
         "strategy": dataset_config.data_processing_strategy,
         "created_at": None,  # TODO: Track creation time
-        "last_processed": processing_logs[0].get('started_at') if processing_logs else None
+        "last_processed": processing_runs[0].get('started_at') if processing_runs else None
     }
 
     return DatasetInfoResponse(

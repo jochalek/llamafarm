@@ -4,6 +4,42 @@
 
 This document outlines a comprehensive plan to persist processing history and display current file status in the LlamaFarm UI. The implementation will be **non-breaking** and leverage existing infrastructure.
 
+### Updated Approach (Latest)
+
+**Key Decision:** Store only **last** processing info in file metadata, not full history.
+
+**Implementation:**
+1. ✅ **File Metadata Extension** - Add `last_processed` field to `lf_data/meta/{hash}.json`
+2. ✅ **ProcessingLogReader** - Read historical runs from existing `lf_data/logs/*.json`
+3. ✅ **Dataset Info API** - `/datasets/{dataset}/info` returns file status + history
+4. ✅ **FileProcessingMetadata Service** - Updates metadata after each processing run
+5. 🚧 **Task Integration** - Hook into RAG processing completion to write metadata
+6. 🚧 **Frontend UI** - Display file status and processing history
+
+**Benefits:**
+- Fast file status lookups (O(1) from metadata)
+- No unbounded growth (single `last_processed` object)
+- Historical data still available from logs (on-demand)
+- Simple, maintainable architecture
+
+### Implementation Status
+
+**✅ Completed:**
+1. `ProcessingLogReader` service - Reads from existing `lf_data/logs/*.json`
+2. `FileProcessingMetadata` service - Updates `last_processed` in metadata
+3. Dataset Info API endpoint - `GET /datasets/{dataset}/info`
+4. API tested with real data - Returns file status + processing history
+
+**🚧 In Progress:**
+1. Integrate `FileProcessingMetadata.update_file_metadata()` into RAG task completion
+2. Update API to read `last_processed` from metadata (currently reads from logs)
+
+**📋 Todo:**
+1. Frontend `useDatasetInfo()` hook
+2. DatasetView UI components for processing history
+3. Test complete workflow in browser
+4. Documentation updates
+
 ---
 
 ## 1. Current Architecture Analysis
@@ -118,7 +154,15 @@ This document outlines a comprehensive plan to persist processing history and di
 
 ---
 
-## 3. Non-Breaking Metadata Schema Extension
+## 3. Simplified Metadata Schema Extension (UPDATED APPROACH)
+
+### Design Decision: Store Only Last Processing Info
+
+**Rationale:**
+- Full history in metadata would grow unbounded
+- Parsing thousands of log files is slow for large projects
+- Users primarily care about current status, not full history
+- Historical details still available in `lf_data/logs/*.json` if needed
 
 ### Extended Metadata Format
 **Location:** `lf_data/meta/{file_hash}.json`
@@ -133,67 +177,69 @@ This document outlines a comprehensive plan to persist processing history and di
   "mime_type": "application/pdf",
   "hash": "2b3e321d...",
 
-  // NEW FIELD (optional, non-breaking)
-  "processing_history": [
-    {
-      "run_id": "task_abc123",
-      "timestamp": "2025-01-15T14:30:45.789012",
-      "dataset": "my_dataset",
-      "database": "main_database",
-      "status": "success",              // success | skipped | failed
-      "reason": null,                   // Only if skipped/failed
-      "processing": {
-        "parser": "PDFParser_LlamaIndex",
-        "extractors": ["KeywordExtractor"],
-        "embedder": "OllamaEmbedder",
-        "chunks_created": 16,
-        "chunks_stored": 16,
-        "chunks_skipped": 0,
-        "chunk_size": 1024,
-        "document_ids": ["doc_1", "doc_2"]  // Vector DB IDs
-      },
-      "strategy": "universal_processor",
-      "duration_seconds": 2.3,
-      "error": null
-    },
-    {
-      "run_id": "task_def456",
-      "timestamp": "2025-01-16T10:15:00.123456",
-      "dataset": "research_papers",
-      "database": "secondary_database",
-      "status": "skipped",
-      "reason": "duplicate",
-      "processing": {
-        "parser": "PDFParser_LlamaIndex",
-        "extractors": ["KeywordExtractor"],
-        "embedder": "OllamaEmbedder",
-        "chunks_created": 16,
-        "chunks_stored": 0,
-        "chunks_skipped": 16,
-        "chunk_size": 1024,
-        "document_ids": []
-      },
-      "strategy": "universal_processor",
-      "duration_seconds": 0.5,
-      "error": null
-    }
-  ]
+  // NEW FIELD: Last processing info (optional, non-breaking)
+  "last_processed": {
+    "timestamp": "2025-01-15T14:30:45.789012",
+    "dataset": "my_dataset",
+    "database": "main_database",
+    "strategy": "universal_processor",
+    "status": "processed",           // "processed", "skipped", "failed"
+    "reason": null,                  // Only if skipped/failed (e.g., "duplicate")
+    "chunks_created": 16,
+    "chunks_stored": 16,
+    "chunks_skipped": 0,
+    "parser": "PDFParser_LlamaIndex",
+    "embedder": "OllamaEmbedder"
+  }
 }
 ```
 
+**Key Changes:**
+- ✅ Single `last_processed` object instead of `processing_history` array
+- ✅ Replaces on each processing run (not appended)
+- ✅ Fast O(1) lookup for file status
+- ✅ No unbounded growth
+- ✅ Includes all essential info: status, dataset, database, chunks, parser
+
+**When to Update:**
+- Every time a file is processed (success, skipped, or failed)
+- Status "skipped" updates timestamp to show it was re-evaluated
+
 **Backward Compatibility:**
-- Files without `processing_history` field continue to work
+- Files without `last_processed` field show as "pending"
 - Old code reading metadata ignores unknown fields
-- New code checks `if "processing_history" in metadata`
+- New code checks `if "last_processed" in metadata`
 
 ---
 
-## 4. Processing Index for Quick Queries
+## 4. Processing History Sources (UPDATED APPROACH)
 
-### Processing Index Format
-**Location:** `lf_data/processing_index.json`
+### Two-Tiered Approach
 
-This index enables fast UI queries without parsing all metadata files.
+**1. File Status: Read from Metadata (Fast)**
+- **Source:** `lf_data/meta/{file_hash}.json` → `last_processed` field
+- **Use Case:** Display file status in UI, show last processing info
+- **Performance:** O(1) - Direct file read by hash
+- **Data:** Current status, last dataset/database, chunks, parser
+
+**2. Processing History: Read from Logs (On-Demand)**
+- **Source:** `lf_data/logs/processing_*.json`
+- **Use Case:** Historical runs, processing trends, debugging
+- **Performance:** Parse logs only when viewing history tab
+- **Data:** All historical runs with complete details
+
+### NO Processing Index Needed
+
+**Previous Plan:** Create `lf_data/processing_index.json` for fast queries
+
+**New Approach:** Not needed because:
+- File status in metadata = O(1) lookup
+- Logs already sorted by timestamp (filename contains date/time)
+- Processing history is view-on-demand, not critical path
+- Simpler architecture, fewer moving parts
+
+### Example: Processing Index Format (DEPRECATED)
+**Location:** ~~`lf_data/processing_index.json`~~ (Not implementing)
 
 ```json
 {
