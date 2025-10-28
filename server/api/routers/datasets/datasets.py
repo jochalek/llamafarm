@@ -1,5 +1,6 @@
 import time
 from enum import Enum
+from typing import List, Optional, Dict, Any
 
 from config.datamodel import Dataset
 from fastapi import APIRouter, HTTPException, Query, UploadFile
@@ -11,6 +12,7 @@ from core.logging import FastAPIStructLogger
 from services.data_service import DataService, FileExistsInAnotherDatasetError
 from services.dataset_service import DatasetService, DatasetWithFileDetails
 from services.project_service import ProjectService
+from services.processing_log_service import ProcessingLogService
 
 logger = FastAPIStructLogger()
 
@@ -352,6 +354,14 @@ async def process_dataset(
         # Save the group result so it can be queried later
         result.save()
 
+        # TODO: Add callback to store processing log when all tasks complete
+        # This requires modifying create_dataset_processing_chain to use a chord
+        # with store_processing_log_task as the callback
+        # Example:
+        # from celery import chord
+        # from core.celery.tasks.processing_callbacks import store_processing_log_task
+        # chord(file_tasks)(store_processing_log_task.s(...))
+
         # Store child task IDs in the backend for tracking
         # This is needed because GroupResult.restore() doesn't always work with filesystem backend
         child_task_ids = [child.id for child in result.results]
@@ -674,3 +684,230 @@ async def delete_data(
             raise HTTPException(status_code=400, detail=str(e)) from e
 
     return {"file_hash": file_hash}
+
+
+# ============================================================================
+# Processing History & Dataset Info Endpoints
+# ============================================================================
+
+
+class FileStatsResponse(BaseModel):
+    """File statistics summary"""
+    total: int = Field(..., description="Total number of files in dataset")
+    processed: int = Field(..., description="Number of files successfully processed")
+    pending: int = Field(..., description="Number of files not yet processed")
+    failed: int = Field(..., description="Number of files that failed processing")
+
+
+class ProcessingRunSummary(BaseModel):
+    """Summary of a single processing run"""
+    task_id: str = Field(..., description="Celery task ID")
+    timestamp: str = Field(..., description="ISO 8601 timestamp of run start")
+    status: str = Field(..., description="Run status: completed, failed, partial")
+    processed: int = Field(..., description="Files processed successfully")
+    skipped: int = Field(..., description="Files skipped (e.g., duplicates)")
+    failed: int = Field(..., description="Files that failed")
+    duration_seconds: float = Field(..., description="Total processing time")
+
+
+class FileDetailResponse(BaseModel):
+    """Detailed information about a file in the dataset"""
+    hash: str = Field(..., description="File content hash")
+    original_filename: str = Field(..., description="Original filename")
+    status: str = Field(..., description="Processing status: processed, pending, failed")
+    last_processed: Optional[str] = Field(None, description="ISO 8601 timestamp of last processing")
+    chunks_stored: int = Field(0, description="Number of chunks stored in vector database")
+    parser_used: Optional[str] = Field(None, description="Parser used for processing")
+    skip_reason: Optional[str] = Field(None, description="Reason if file was skipped")
+
+
+class VectorDatabaseStats(BaseModel):
+    """Vector database statistics"""
+    total_chunks: int = Field(0, description="Total chunks in database")
+    total_documents: int = Field(0, description="Total documents stored")
+    embeddings_generated: int = Field(0, description="Number of embeddings generated")
+
+
+class DatasetInfoResponse(BaseModel):
+    """Comprehensive dataset information including processing history"""
+    dataset: Dict[str, Any] = Field(..., description="Dataset metadata")
+    files: FileStatsResponse = Field(..., description="File statistics")
+    processing_history: List[ProcessingRunSummary] = Field(
+        ..., description="Historical processing runs (most recent first)"
+    )
+    file_details: List[FileDetailResponse] = Field(..., description="Detailed file information")
+    vector_database_stats: VectorDatabaseStats = Field(..., description="Vector database statistics")
+
+
+@router.get(
+    "/{dataset}/info",
+    response_model=DatasetInfoResponse,
+    operation_id="get_dataset_info",
+    summary="Get comprehensive dataset information",
+    description="Returns dataset metadata, file statistics, processing history, and vector database stats"
+)
+async def get_dataset_info(
+    namespace: str,
+    project: str,
+    dataset: str,
+    include_file_details: bool = Query(
+        True, description="Include detailed information for each file"
+    ),
+    history_limit: int = Query(
+        10, description="Maximum number of historical processing runs to return"
+    )
+):
+    """
+    Get comprehensive information about a dataset.
+
+    This endpoint provides:
+    - Dataset metadata (name, database, strategy)
+    - File statistics (total, processed, pending, failed)
+    - Processing history (recent runs with summaries)
+    - Detailed file information (optional)
+    - Vector database statistics (TODO: requires RAG service integration)
+
+    Args:
+        namespace: Project namespace
+        project: Project name
+        dataset: Dataset name
+        include_file_details: Whether to include per-file details
+        history_limit: Maximum number of historical runs to return
+
+    Returns:
+        Comprehensive dataset information
+
+    Raises:
+        HTTPException: 404 if dataset not found
+    """
+    logger.bind(namespace=namespace, project=project, dataset=dataset)
+
+    # Get project directory
+    project_dir = ProjectService.get_project_directory(namespace, project)
+
+    # Get dataset configuration
+    try:
+        dataset_config = DatasetService.get_dataset(namespace, project, dataset)
+    except Exception as e:
+        logger.error(f"Dataset not found: {e}")
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found") from e
+
+    # Get processing history from logs
+    processing_logs = ProcessingLogService.get_dataset_processing_history(
+        project_dir=project_dir,
+        dataset=dataset,
+        limit=history_limit
+    )
+
+    # Convert processing logs to summaries
+    processing_history = []
+    for log in processing_logs:
+        processing_history.append(ProcessingRunSummary(
+            task_id=log.get('task_id', 'unknown'),
+            timestamp=log.get('started_at', ''),
+            status='completed',  # TODO: Determine status from log
+            processed=log.get('summary', {}).get('processed', 0),
+            skipped=log.get('summary', {}).get('skipped', 0),
+            failed=log.get('summary', {}).get('failed', 0),
+            duration_seconds=log.get('duration_seconds', 0.0)
+        ))
+
+    # Get file metadata
+    file_details = []
+    processed_count = 0
+    pending_count = 0
+    failed_count = 0
+
+    if include_file_details:
+        # Get all files in dataset
+        for file_hash in dataset_config.files:
+            try:
+                # Get file metadata
+                metadata = DataService.get_data_file_metadata_by_hash(
+                    namespace=namespace,
+                    project_id=project,
+                    file_content_hash=file_hash
+                )
+
+                # Get processing history for this file
+                file_history = ProcessingLogService.get_file_processing_history(
+                    project_dir=project_dir,
+                    file_hash=file_hash,
+                    dataset=dataset
+                )
+
+                # Determine status from most recent processing
+                status = "pending"
+                last_processed = None
+                chunks_stored = 0
+                parser_used = None
+                skip_reason = None
+
+                if file_history:
+                    latest = file_history[0]
+                    file_detail = latest.get('file_detail', {})
+                    status = file_detail.get('status', 'pending')
+                    last_processed = latest.get('timestamp')
+                    chunks_stored = file_detail.get('chunks_stored', 0)
+                    parser_used = file_detail.get('parser')
+                    skip_reason = file_detail.get('reason')
+
+                # Update counts
+                if status == 'success':
+                    processed_count += 1
+                elif status == 'failed':
+                    failed_count += 1
+                else:
+                    pending_count += 1
+
+                file_details.append(FileDetailResponse(
+                    hash=file_hash,
+                    original_filename=metadata.original_file_name,
+                    status=status,
+                    last_processed=last_processed,
+                    chunks_stored=chunks_stored,
+                    parser_used=parser_used,
+                    skip_reason=skip_reason
+                ))
+
+            except FileNotFoundError:
+                logger.warning(f"Metadata not found for file {file_hash}")
+                pending_count += 1
+                continue
+    else:
+        # Just count total files
+        pending_count = len(dataset_config.files)
+
+    # Build file statistics
+    total_files = len(dataset_config.files)
+    file_stats = FileStatsResponse(
+        total=total_files,
+        processed=processed_count,
+        pending=pending_count,
+        failed=failed_count
+    )
+
+    # TODO: Get vector database statistics from RAG service
+    # This requires integration with the vector store service
+    vector_db_stats = VectorDatabaseStats(
+        total_chunks=0,  # TODO: Query vector database
+        total_documents=0,  # TODO: Query vector database
+        embeddings_generated=0  # TODO: Query vector database
+    )
+
+    # Build dataset metadata
+    dataset_metadata = {
+        "name": dataset_config.name,
+        "database": dataset_config.database,
+        "strategy": dataset_config.data_processing_strategy,
+        "created_at": None,  # TODO: Track creation time
+        "last_processed": processing_logs[0].get('started_at') if processing_logs else None
+    }
+
+    return DatasetInfoResponse(
+        dataset=dataset_metadata,
+        files=file_stats,
+        processing_history=processing_history,
+        file_details=file_details,
+        vector_database_stats=vector_db_stats
+    )
