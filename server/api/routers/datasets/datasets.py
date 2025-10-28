@@ -12,7 +12,7 @@ from core.logging import FastAPIStructLogger
 from services.data_service import DataService, FileExistsInAnotherDatasetError
 from services.dataset_service import DatasetService, DatasetWithFileDetails
 from services.project_service import ProjectService
-from services.processing_log_service import ProcessingLogService
+from services.processing_log_reader import ProcessingLogReader
 
 logger = FastAPIStructLogger()
 
@@ -354,13 +354,8 @@ async def process_dataset(
         # Save the group result so it can be queried later
         result.save()
 
-        # TODO: Add callback to store processing log when all tasks complete
-        # This requires modifying create_dataset_processing_chain to use a chord
-        # with store_processing_log_task as the callback
-        # Example:
-        # from celery import chord
-        # from core.celery.tasks.processing_callbacks import store_processing_log_task
-        # chord(file_tasks)(store_processing_log_task.s(...))
+        # Note: Processing logs are automatically created by rag/core/processing_logger.py
+        # and stored in lf_data/logs/processing_*.json during RAG processing
 
         # Store child task IDs in the backend for tracking
         # This is needed because GroupResult.restore() doesn't always work with filesystem backend
@@ -792,24 +787,30 @@ async def get_dataset_info(
         logger.error(f"Dataset not found: {e}")
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found") from e
 
-    # Get processing history from logs
-    processing_logs = ProcessingLogService.get_dataset_processing_history(
+    # Get processing history from existing logs
+    processing_runs = ProcessingLogReader.get_dataset_history(
         project_dir=project_dir,
         dataset=dataset,
         limit=history_limit
     )
 
-    # Convert processing logs to summaries
+    # Convert to API response format
     processing_history = []
-    for log in processing_logs:
+    for run in processing_runs:
+        # Determine status based on failures
+        if run.get('failed', 0) > 0:
+            status = 'partial' if run.get('processed', 0) > 0 else 'failed'
+        else:
+            status = 'completed'
+
         processing_history.append(ProcessingRunSummary(
-            task_id=log.get('task_id', 'unknown'),
-            timestamp=log.get('started_at', ''),
-            status='completed',  # TODO: Determine status from log
-            processed=log.get('summary', {}).get('processed', 0),
-            skipped=log.get('summary', {}).get('skipped', 0),
-            failed=log.get('summary', {}).get('failed', 0),
-            duration_seconds=log.get('duration_seconds', 0.0)
+            task_id=run.get('session_timestamp', 'unknown'),  # Use session timestamp as ID
+            timestamp=run.get('started_at', ''),
+            status=status,
+            processed=run.get('processed', 0),
+            skipped=run.get('skipped', 0),
+            failed=run.get('failed', 0),
+            duration_seconds=run.get('duration_seconds', 0.0)
         ))
 
     # Get file metadata
@@ -829,8 +830,8 @@ async def get_dataset_info(
                     file_content_hash=file_hash
                 )
 
-                # Get processing history for this file
-                file_history = ProcessingLogService.get_file_processing_history(
+                # Get processing history for this file from logs
+                file_history = ProcessingLogReader.get_file_history(
                     project_dir=project_dir,
                     file_hash=file_hash,
                     dataset=dataset
@@ -845,12 +846,11 @@ async def get_dataset_info(
 
                 if file_history:
                     latest = file_history[0]
-                    file_detail = latest.get('file_detail', {})
-                    status = file_detail.get('status', 'pending')
+                    status = latest.get('status', 'pending')
                     last_processed = latest.get('timestamp')
-                    chunks_stored = file_detail.get('chunks_stored', 0)
-                    parser_used = file_detail.get('parser')
-                    skip_reason = file_detail.get('reason')
+                    chunks_stored = latest.get('chunks', 0)
+                    parser_used = latest.get('parser')
+                    skip_reason = latest.get('error')  # Error message as skip reason
 
                 # Update counts
                 if status == 'success':
