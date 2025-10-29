@@ -12,7 +12,7 @@ from core.logging import FastAPIStructLogger
 from services.data_service import DataService, FileExistsInAnotherDatasetError
 from services.dataset_service import DatasetService, DatasetWithFileDetails
 from services.project_service import ProjectService
-from services.processing_log_reader import ProcessingLogReader
+from services.dataset_history_service import DatasetHistoryService
 
 logger = FastAPIStructLogger()
 
@@ -789,16 +789,18 @@ async def get_dataset_info(
     if dataset_config is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found")
 
-    # Get processing history from existing logs
-    processing_runs = ProcessingLogReader.get_dataset_history(
+    # Get comprehensive dataset info from history service
+    # This reads from metadata (fast) and logs (on-demand)
+    dataset_info = DatasetHistoryService.get_dataset_info(
         project_dir=project_dir,
         dataset=dataset,
-        limit=history_limit
+        file_hashes=dataset_config.files,
+        history_limit=history_limit
     )
 
-    # Convert to API response format
+    # Convert processing history to API response format
     processing_history = []
-    for run in processing_runs:
+    for run in dataset_info['processing_history']:
         # Determine status based on failures
         if run.get('failed', 0) > 0:
             status = 'partial' if run.get('processed', 0) > 0 else 'failed'
@@ -806,7 +808,7 @@ async def get_dataset_info(
             status = 'completed'
 
         processing_history.append(ProcessingRunSummary(
-            task_id=run.get('session_timestamp', 'unknown'),  # Use session timestamp as ID
+            task_id=run.get('session_timestamp', 'unknown'),
             timestamp=run.get('started_at', ''),
             status=status,
             processed=run.get('processed', 0),
@@ -815,14 +817,18 @@ async def get_dataset_info(
             duration_seconds=run.get('duration_seconds', 0.0)
         ))
 
-    # Get file metadata
-    file_details = []
-    processed_count = 0
-    pending_count = 0
-    failed_count = 0
+    # Build file statistics from aggregated counts
+    file_counts = dataset_info['files']
+    file_stats = FileStatsResponse(
+        total=file_counts['total'],
+        processed=file_counts['processed'],
+        pending=file_counts['pending'],
+        failed=file_counts['failed']
+    )
 
+    # Get detailed file information if requested
+    file_details = []
     if include_file_details:
-        # Get all files in dataset
         for file_hash in dataset_config.files:
             try:
                 # Get file metadata
@@ -832,69 +838,32 @@ async def get_dataset_info(
                     file_content_hash=file_hash
                 )
 
-                # Get processing history for this file from logs
-                file_history = ProcessingLogReader.get_file_history(
+                # Get current status from metadata (fast O(1) lookup)
+                file_status = DatasetHistoryService.get_file_status(
                     project_dir=project_dir,
                     file_hash=file_hash,
                     dataset=dataset
                 )
 
-                # Determine status from most recent processing
-                status = "pending"
-                last_processed = None
-                chunks_stored = 0
-                parser_used = None
-                skip_reason = None
-
-                if file_history:
-                    latest = file_history[0]
-                    status = latest.get('status', 'pending')
-                    last_processed = latest.get('timestamp')
-                    chunks_stored = latest.get('chunks', 0)
-                    parser_used = latest.get('parser')
-                    skip_reason = latest.get('error')  # Error message as skip reason
-
-                # Update counts
-                if status == 'success':
-                    processed_count += 1
-                elif status == 'failed':
-                    failed_count += 1
-                else:
-                    pending_count += 1
-
                 file_details.append(FileDetailResponse(
                     hash=file_hash,
                     original_filename=metadata.original_file_name,
-                    status=status,
-                    last_processed=last_processed,
-                    chunks_stored=chunks_stored,
-                    parser_used=parser_used,
-                    skip_reason=skip_reason
+                    status=file_status['status'],
+                    last_processed=file_status['last_processed'],
+                    chunks_stored=file_status.get('chunks_stored', 0),
+                    parser_used=file_status.get('parser'),
+                    skip_reason=file_status.get('reason')
                 ))
 
             except FileNotFoundError:
                 logger.warning(f"Metadata not found for file {file_hash}")
-                pending_count += 1
                 continue
-    else:
-        # Just count total files
-        pending_count = len(dataset_config.files)
-
-    # Build file statistics
-    total_files = len(dataset_config.files)
-    file_stats = FileStatsResponse(
-        total=total_files,
-        processed=processed_count,
-        pending=pending_count,
-        failed=failed_count
-    )
 
     # TODO: Get vector database statistics from RAG service
-    # This requires integration with the vector store service
     vector_db_stats = VectorDatabaseStats(
-        total_chunks=0,  # TODO: Query vector database
-        total_documents=0,  # TODO: Query vector database
-        embeddings_generated=0  # TODO: Query vector database
+        total_chunks=0,
+        total_documents=0,
+        embeddings_generated=0
     )
 
     # Build dataset metadata
@@ -903,7 +872,7 @@ async def get_dataset_info(
         "database": dataset_config.database,
         "strategy": dataset_config.data_processing_strategy,
         "created_at": None,  # TODO: Track creation time
-        "last_processed": processing_runs[0].get('started_at') if processing_runs else None
+        "last_processed": processing_history[0].timestamp if processing_history else None
     }
 
     return DatasetInfoResponse(
@@ -913,3 +882,185 @@ async def get_dataset_info(
         file_details=file_details,
         vector_database_stats=vector_db_stats
     )
+
+
+# Processing history and logs endpoints
+
+class LogFileInfo(BaseModel):
+    filename: str = Field(..., description="Log filename")
+    path: str = Field(..., description="Relative path from project directory")
+    size_bytes: int = Field(..., description="File size in bytes")
+    modified: str = Field(..., description="Last modified timestamp (ISO format)")
+
+
+class FileStatusResponse(BaseModel):
+    file_hash: str = Field(..., description="File content hash")
+    status: str = Field(..., description="Processing status (processed, skipped, failed, pending)")
+    last_processed: Optional[str] = Field(None, description="Last processing timestamp")
+    dataset: Optional[str] = Field(None, description="Dataset name")
+    database: Optional[str] = Field(None, description="Vector database name")
+    strategy: Optional[str] = Field(None, description="Processing strategy used")
+    chunks_created: int = Field(0, description="Number of chunks created")
+    chunks_stored: int = Field(0, description="Number of chunks stored")
+    chunks_skipped: int = Field(0, description="Number of chunks skipped")
+    parser: Optional[str] = Field(None, description="Parser used")
+    embedder: Optional[str] = Field(None, description="Embedder used")
+    reason: Optional[str] = Field(None, description="Reason if skipped/failed")
+
+
+@router.get(
+    "/{dataset}/logs",
+    response_model=List[LogFileInfo],
+    operation_id="list_dataset_logs",
+    summary="List processing log files for a dataset"
+)
+async def list_dataset_logs(
+    namespace: str,
+    project: str,
+    dataset: str
+):
+    """
+    List all processing log files for a dataset.
+
+    Returns metadata about log files without reading their contents.
+    Use the /logs/{log_filename} endpoint to retrieve log contents.
+
+    Args:
+        namespace: Project namespace
+        project: Project name
+        dataset: Dataset name
+
+    Returns:
+        List of log file information (most recent first)
+    """
+    project_dir = ProjectService.get_project_dir(namespace, project)
+
+    log_files = DatasetHistoryService.list_log_files(
+        project_dir=project_dir,
+        dataset=dataset
+    )
+
+    return [LogFileInfo(**log) for log in log_files]
+
+
+@router.get(
+    "/{dataset}/logs/{log_filename}",
+    operation_id="get_dataset_log",
+    summary="Get specific log file contents"
+)
+async def get_dataset_log(
+    namespace: str,
+    project: str,
+    dataset: str,
+    log_filename: str
+):
+    """
+    Get the contents of a specific processing log file.
+
+    Args:
+        namespace: Project namespace
+        project: Project name
+        dataset: Dataset name
+        log_filename: Name of the log file (e.g., "processing_20250115_143000_my_dataset.json")
+
+    Returns:
+        Parsed log file contents
+
+    Raises:
+        HTTPException: 404 if log file not found
+    """
+    project_dir = ProjectService.get_project_dir(namespace, project)
+
+    log_data = DatasetHistoryService.get_log_file_content(
+        project_dir=project_dir,
+        log_filename=log_filename
+    )
+
+    if log_data is None:
+        raise HTTPException(status_code=404, detail=f"Log file '{log_filename}' not found")
+
+    return log_data
+
+
+@router.get(
+    "/{dataset}/files/{file_hash}/status",
+    response_model=FileStatusResponse,
+    operation_id="get_file_status",
+    summary="Get processing status for a specific file"
+)
+async def get_file_processing_status(
+    namespace: str,
+    project: str,
+    dataset: str,
+    file_hash: str
+):
+    """
+    Get the current processing status for a specific file.
+
+    This reads from file metadata for fast O(1) lookup.
+
+    Args:
+        namespace: Project namespace
+        project: Project name
+        dataset: Dataset name
+        file_hash: File content hash
+
+    Returns:
+        File processing status and metadata
+    """
+    project_dir = ProjectService.get_project_dir(namespace, project)
+
+    file_status = DatasetHistoryService.get_file_status(
+        project_dir=project_dir,
+        file_hash=file_hash,
+        dataset=dataset
+    )
+
+    return FileStatusResponse(**file_status)
+
+
+class FileHistoryEvent(BaseModel):
+    timestamp: str = Field(..., description="Processing timestamp")
+    dataset: str = Field(..., description="Dataset name")
+    status: str = Field(..., description="Processing status")
+    parser: Optional[str] = Field(None, description="Parser used")
+    chunks: int = Field(0, description="Number of chunks created")
+    chunk_size: Optional[int] = Field(None, description="Chunk size in characters")
+    error: Optional[str] = Field(None, description="Error message if failed")
+
+
+@router.get(
+    "/{dataset}/files/{file_hash}/history",
+    response_model=List[FileHistoryEvent],
+    operation_id="get_file_history",
+    summary="Get processing history for a specific file"
+)
+async def get_file_processing_history(
+    namespace: str,
+    project: str,
+    dataset: str,
+    file_hash: str
+):
+    """
+    Get the complete processing history for a specific file across all runs.
+
+    This reads from log files on-demand.
+
+    Args:
+        namespace: Project namespace
+        project: Project name
+        dataset: Dataset name
+        file_hash: File content hash
+
+    Returns:
+        List of processing events for this file (most recent first)
+    """
+    project_dir = ProjectService.get_project_dir(namespace, project)
+
+    file_history = DatasetHistoryService.get_file_history(
+        project_dir=project_dir,
+        file_hash=file_hash,
+        dataset=dataset
+    )
+
+    return [FileHistoryEvent(**event) for event in file_history]

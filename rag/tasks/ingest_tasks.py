@@ -21,6 +21,9 @@ from core.logging import RAGStructLogger
 
 logger = RAGStructLogger("rag.tasks.ingest")
 
+# Import metadata service for status tracking
+from services.file_processing_metadata import FileProcessingMetadata
+
 
 class IngestTask(Task):
     """Base task class for ingestion operations with error handling."""
@@ -205,6 +208,49 @@ def ingest_file_with_rag_task(
             },
         )
 
+        # Update file metadata with processing status
+        # Extract file hash from source path (if it's in lf_data/raw)
+        if "lf_data/raw" in str(source_path) and dataset_name:
+            try:
+                file_hash = Path(source_path).name
+
+                # Map result status to metadata status
+                metadata_status = "processed"
+                if details.get("status") == "skipped":
+                    metadata_status = "skipped"
+                elif not success:
+                    metadata_status = "failed"
+
+                FileProcessingMetadata.update_file_metadata(
+                    project_dir=project_dir,
+                    file_hash=file_hash,
+                    dataset=dataset_name,
+                    database=database_name,
+                    strategy=data_processing_strategy_name,
+                    status=metadata_status,
+                    chunks_created=details.get("chunks", 0) or 0,
+                    chunks_stored=result.get("stored_count", 0),
+                    chunks_skipped=result.get("skipped_count", 0),
+                    parser=details.get("parser"),
+                    embedder=details.get("embedder"),
+                    reason=details.get("reason"),
+                )
+
+                logger.info(
+                    "Updated file metadata",
+                    extra={
+                        "file_hash": file_hash[:16],
+                        "status": metadata_status,
+                        "dataset": dataset_name,
+                    },
+                )
+            except Exception as e:
+                # Don't fail the task if metadata update fails
+                logger.warning(
+                    "Failed to update file metadata",
+                    extra={"error": str(e), "file_hash": file_hash[:16] if 'file_hash' in locals() else 'unknown'},
+                )
+
         return success, details
 
     except Exception as e:
@@ -220,4 +266,25 @@ def ingest_file_with_rag_task(
             exc_info=True,
         )
         details["error"] = str(e)
+
+        # Update metadata for failed file
+        if "lf_data/raw" in str(source_path) and dataset_name:
+            try:
+                file_hash = Path(source_path).name
+                FileProcessingMetadata.update_file_metadata(
+                    project_dir=project_dir,
+                    file_hash=file_hash,
+                    dataset=dataset_name,
+                    database=database_name,
+                    strategy=data_processing_strategy_name,
+                    status="failed",
+                    chunks_created=0,
+                    chunks_stored=0,
+                    chunks_skipped=0,
+                    reason=str(e),
+                )
+                logger.info("Updated failed file metadata", extra={"file_hash": file_hash[:16]})
+            except Exception as meta_err:
+                logger.warning("Failed to update metadata for failed file", extra={"error": str(meta_err)})
+
         return False, details
