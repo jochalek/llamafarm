@@ -504,23 +504,31 @@ function DatasetView() {
       if (taskStatus.result?.details) {
         const statusUpdates: Record<string, 'processed' | 'failed' | 'skipped'> = {}
         taskStatus.result.details.forEach((detail: any) => {
-          if (detail.file_hash) {
+          // Try multiple locations for file hash
+          const fileHash = detail.file_hash || detail.details?.file_hash || detail.hash
+          
+          if (fileHash) {
             // Determine status based on multiple possible fields
             let status: 'processed' | 'failed' | 'skipped' = 'processed'
             
             // Check for explicit status field
             if (detail.status === 'skipped' || detail.details?.status === 'skipped') {
               status = 'skipped'
-            } else if (!detail.success) {
-              status = 'failed'
             } else if (detail.details?.result?.status === 'skipped') {
               status = 'skipped'
+            } else if (detail.success === false) {
+              // Only mark as failed if explicitly false
+              status = 'failed'
             }
             
-            statusUpdates[detail.file_hash] = status
+            statusUpdates[fileHash] = status
+            console.log('Updating status for file:', fileHash, 'to', status, 'detail:', detail)
+          } else {
+            console.warn('No file hash found in processing detail:', detail)
           }
         })
         if (Object.keys(statusUpdates).length > 0) {
+          console.log('All status updates:', statusUpdates)
           updateFileStatus(statusUpdates)
         }
       }
@@ -988,12 +996,13 @@ function DatasetView() {
                           const details = fileResult.details || {}
                           const result = details.result || {}
                           const isSkipped = result.status === 'skipped' || details.status === 'skipped'
-                          const isFailed = !fileResult.success
-                          const isSuccess = fileResult.success && !isSkipped
+                          // Only mark as failed if explicitly failed (success === false), not if undefined
+                          const isFailed = fileResult.success === false
+                          const isSuccess = (fileResult.success !== false) && !isSkipped
 
                           // Get filename from result (actual name) or fall back to hash
-                          const displayFilename = result.filename || details.filename || fileResult.file_hash
-                          const isHashFilename = displayFilename === fileResult.file_hash || !result.filename
+                          const displayFilename = result.filename || details.filename || fileResult.file_hash || 'Unknown file'
+                          const isHashFilename = (displayFilename === fileResult.file_hash || !result.filename) && displayFilename !== 'Unknown file'
 
                           // Get file extension for icon
                           const getFileExtension = (filename: string | undefined) => {
@@ -1642,6 +1651,11 @@ function DatasetView() {
                       )
                       .map(f => {
                         const status = f.fullHash ? fileProcessingStatus[f.fullHash] : undefined
+                        
+                        // Debug logging
+                        if (f.fullHash && Object.keys(fileProcessingStatus).length > 0) {
+                          console.log('File:', f.name, 'Hash:', f.fullHash, 'Status:', status, 'All statuses:', fileProcessingStatus)
+                        }
                         
                         return (
                           <li
