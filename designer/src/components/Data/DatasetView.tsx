@@ -293,33 +293,21 @@ function DatasetView() {
   const [isDropped, setIsDropped] = useState(false)
   const dropZoneRef = useRef<HTMLDivElement>(null)
 
-  // File processing status tracking with localStorage
-  const [fileProcessingStatus, setFileProcessingStatus] = useState<Record<string, 'processed' | 'failed' | 'skipped'>>({})
-
-  // Load file processing status from localStorage on mount
-  useEffect(() => {
-    if (!activeProject?.namespace || !activeProject?.project || !datasetId) return
-    const key = `llamafarm_file_processing_status_${activeProject.namespace}_${activeProject.project}_${datasetId}`
-    const stored = localStorage.getItem(key)
-    if (stored) {
-      try {
-        setFileProcessingStatus(JSON.parse(stored))
-      } catch (e) {
-        console.error('Failed to parse processing status:', e)
-      }
+  // File processing status - now derived from server data, not localStorage
+  const fileProcessingStatus = useMemo(() => {
+    const statuses: Record<string, 'processed' | 'failed' | 'skipped'> = {}
+    
+    // Get status from current dataset's file metadata if available
+    if (currentApiDataset?.details?.files_metadata) {
+      currentApiDataset.details.files_metadata.forEach((file: any) => {
+        if (file.hash && file.processing_status) {
+          statuses[file.hash] = file.processing_status
+        }
+      })
     }
-  }, [activeProject?.namespace, activeProject?.project, datasetId])
-
-  // Helper to update file processing status
-  const updateFileStatus = useCallback((updates: Record<string, 'processed' | 'failed' | 'skipped'>) => {
-    if (!activeProject?.namespace || !activeProject?.project || !datasetId) return
-    const key = `llamafarm_file_processing_status_${activeProject.namespace}_${activeProject.project}_${datasetId}`
-    setFileProcessingStatus(prevStatus => {
-      const newStatus = { ...prevStatus, ...updates }
-      localStorage.setItem(key, JSON.stringify(newStatus))
-      return newStatus
-    })
-  }, [activeProject?.namespace, activeProject?.project, datasetId])
+    
+    return statuses
+  }, [currentApiDataset])
 
   // Note: Custom strategies now come from API via project config, not localStorage
 
@@ -500,43 +488,13 @@ function DatasetView() {
       // Task completed successfully
       setCurrentTaskId(null)
 
-      // Update per-file processing status from task result
-      if (taskStatus.result?.details) {
-        const statusUpdates: Record<string, 'processed' | 'failed' | 'skipped'> = {}
-        taskStatus.result.details.forEach((detail: any) => {
-          // Try multiple locations for file hash
-          const fileHash = detail.file_hash || detail.details?.file_hash || detail.hash
-          
-          if (fileHash) {
-            // Determine status based on multiple possible fields
-            let status: 'processed' | 'failed' | 'skipped' = 'processed'
-            
-            // Check for explicit status field
-            if (detail.status === 'skipped' || detail.details?.status === 'skipped') {
-              status = 'skipped'
-            } else if (detail.details?.result?.status === 'skipped') {
-              status = 'skipped'
-            } else if (detail.success === false) {
-              // Only mark as failed if explicitly false
-              status = 'failed'
-            }
-            
-            statusUpdates[fileHash] = status
-            console.log('Updating status for file:', fileHash, 'to', status, 'detail:', detail)
-          } else {
-            console.warn('No file hash found in processing detail:', detail)
-          }
-        })
-        if (Object.keys(statusUpdates).length > 0) {
-          console.log('All status updates:', statusUpdates)
-          updateFileStatus(statusUpdates)
-        }
-      }
-
       // Store the processing result
       if (taskStatus.result) {
         setProcessingResult(taskStatus.result)
       }
+
+      // Refetch datasets to get updated processing status from server
+      refetchDatasets()
 
       toast({
         message: taskStatus.result?.processed_files
@@ -555,7 +513,7 @@ function DatasetView() {
         variant: 'destructive',
       })
     }
-  }, [taskStatus?.state, taskStatus?.error, taskStatus?.result, toast, currentTaskId, updateFileStatus])
+  }, [taskStatus?.state, taskStatus?.error, taskStatus?.result, toast, currentTaskId, refetchDatasets])
 
   const openEdit = () => {
     setEditName(dataset?.name ?? '')
@@ -993,6 +951,8 @@ function DatasetView() {
                     <div className="rounded-md border border-border max-h-96 overflow-auto">
                       {processingResult.details.map(
                         (fileResult: any, idx: number) => {
+                          console.log('Processing result detail:', fileResult)
+                          
                           const details = fileResult.details || {}
                           const result = details.result || {}
                           const isSkipped = result.status === 'skipped' || details.status === 'skipped'
@@ -1000,9 +960,16 @@ function DatasetView() {
                           const isFailed = fileResult.success === false
                           const isSuccess = (fileResult.success !== false) && !isSkipped
 
-                          // Get filename from result (actual name) or fall back to hash
-                          const displayFilename = result.filename || details.filename || fileResult.file_hash || 'Unknown file'
-                          const isHashFilename = (displayFilename === fileResult.file_hash || !result.filename) && displayFilename !== 'Unknown file'
+                          // Get filename from multiple possible locations
+                          const displayFilename = fileResult.filename || result.filename || details.filename || fileResult.file_hash || 'Unknown file'
+                          const isHashFilename = (displayFilename === fileResult.file_hash || !fileResult.filename) && displayFilename !== 'Unknown file'
+                          
+                          console.log('Filename extracted:', displayFilename, 'from:', {
+                            'fileResult.filename': fileResult.filename,
+                            'result.filename': result.filename,
+                            'details.filename': details.filename,
+                            'fileResult.file_hash': fileResult.file_hash
+                          })
 
                           // Get file extension for icon
                           const getFileExtension = (filename: string | undefined) => {
@@ -1013,10 +980,12 @@ function DatasetView() {
                           const fileExt = getFileExtension(displayFilename)
                           const fileIcon = ['pdf', 'doc', 'docx', 'txt', 'md'].includes(fileExt) ? '📄' : '📁'
 
-                          // Calculate total chunks if available
-                          const totalChunks = result.document_count || details.chunks || 0
-                          const storedChunks = result.stored_count || 0
-                          const skippedChunks = result.skipped_count || 0
+                          // Calculate total chunks if available - check multiple locations
+                          const totalChunks = result.document_count || result.chunks || details.chunks || result.total_chunks || 0
+                          const storedChunks = result.stored_count || result.chunks_stored || 0
+                          const skippedChunks = result.skipped_count || result.chunks_skipped || 0
+                          
+                          console.log('Chunk info:', { totalChunks, storedChunks, skippedChunks, result, details })
 
                           return (
                             <div
@@ -1651,11 +1620,6 @@ function DatasetView() {
                       )
                       .map(f => {
                         const status = f.fullHash ? fileProcessingStatus[f.fullHash] : undefined
-                        
-                        // Debug logging
-                        if (f.fullHash && Object.keys(fileProcessingStatus).length > 0) {
-                          console.log('File:', f.name, 'Hash:', f.fullHash, 'Status:', status, 'All statuses:', fileProcessingStatus)
-                        }
                         
                         return (
                           <li
