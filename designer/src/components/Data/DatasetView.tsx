@@ -293,26 +293,53 @@ function DatasetView() {
   const [isDropped, setIsDropped] = useState(false)
   const dropZoneRef = useRef<HTMLDivElement>(null)
 
-  // File processing status - now derived from server data, not localStorage
+  // File processing status - derived from processing result and server data
   const fileProcessingStatus = useMemo(() => {
     const statuses: Record<string, 'processed' | 'failed' | 'skipped'> = {}
     
     console.log('Current API Dataset:', currentApiDataset)
+    console.log('Processing Result for status:', processingResult)
     
-    // Get status from current dataset's file metadata if available
+    // First, try to get status from processing result
+    if (processingResult?.details) {
+      processingResult.details.forEach((detail: any) => {
+        const fileHash = detail.file_hash || detail.details?.file_hash || detail.hash
+        if (fileHash) {
+          let status: 'processed' | 'failed' | 'skipped' = 'processed'
+          
+          if (detail.status === 'skipped' || detail.details?.status === 'skipped') {
+            status = 'skipped'
+          } else if (detail.details?.result?.status === 'skipped') {
+            status = 'skipped'
+          } else if (detail.success === false) {
+            status = 'failed'
+          }
+          
+          statuses[fileHash] = status
+        }
+      })
+    }
+    
+    // Then, get status from current dataset's file metadata if available
     if (currentApiDataset?.details?.files_metadata) {
       console.log('Files metadata:', currentApiDataset.details.files_metadata)
       currentApiDataset.details.files_metadata.forEach((file: any) => {
         console.log('File metadata:', file)
-        if (file.hash && file.processing_status) {
-          statuses[file.hash] = file.processing_status
+        // Use processing_status if it exists, or check if file has been processed
+        if (file.hash) {
+          if (file.processing_status) {
+            statuses[file.hash] = file.processing_status
+          } else if (file.processed || file.chunks_count > 0) {
+            // If file has chunks, it's been processed
+            statuses[file.hash] = 'processed'
+          }
         }
       })
     }
     
     console.log('Derived file processing statuses:', statuses)
     return statuses
-  }, [currentApiDataset])
+  }, [currentApiDataset, processingResult])
 
   // Note: Custom strategies now come from API via project config, not localStorage
 
@@ -971,13 +998,16 @@ function DatasetView() {
                           const isSuccess = (fileResult.success !== false) && !isSkipped
 
                           // Get filename from multiple possible locations
-                          const displayFilename = fileResult.filename || result.filename || details.filename || fileResult.file_hash || 'Unknown file'
+                          const displayFilename = fileResult.filename || fileResult.original_file_name || result.filename || result.original_file_name || details.filename || details.original_file_name || fileResult.file_hash || 'Unknown file'
                           const isHashFilename = (displayFilename === fileResult.file_hash || !fileResult.filename) && displayFilename !== 'Unknown file'
                           
                           console.log('Filename extracted:', displayFilename, 'from:', {
                             'fileResult.filename': fileResult.filename,
+                            'fileResult.original_file_name': fileResult.original_file_name,
                             'result.filename': result.filename,
+                            'result.original_file_name': result.original_file_name,
                             'details.filename': details.filename,
+                            'details.original_file_name': details.original_file_name,
                             'fileResult.file_hash': fileResult.file_hash
                           })
 
