@@ -130,14 +130,23 @@ function DatasetView() {
       ? (currentApiDataset as any).details.files_metadata
       : (currentApiDataset as any)?.files || []
     if (!filesSource) return []
-    return filesSource.map((fileObj: any) => {
+    
+    // Track seen hashes to prevent duplicates
+    const seenHashes = new Set<string>()
+    const uniqueFiles: any[] = []
+    
+    filesSource.forEach((fileObj: any) => {
+      let fileHash: string
+      let fileData: any
+      
       // Handle new API response format with file details
       if (
         typeof fileObj === 'object' &&
         fileObj !== null &&
         ('original_filename' in fileObj || 'original_file_name' in fileObj)
       ) {
-        return {
+        fileHash = fileObj.hash
+        fileData = {
           id: fileObj.hash,
           name: fileObj.original_filename || fileObj.original_file_name,
           size: fileObj.size,
@@ -145,34 +154,41 @@ function DatasetView() {
           type: fileObj.mime_type,
           fullHash: fileObj.hash, // Store full hash for operations
         }
+      } else {
+        // Fallback for legacy format (file hash strings)
+        fileHash = typeof fileObj === 'string' ? fileObj : fileObj?.id || fileObj || ''
+        const size =
+          typeof fileObj === 'object' &&
+          fileObj !== null &&
+          'size' in fileObj &&
+          fileObj.size !== undefined
+            ? fileObj.size
+            : 'unknown'
+        const lastModified =
+          typeof fileObj === 'object' &&
+          fileObj !== null &&
+          'lastModified' in fileObj &&
+          fileObj.lastModified !== undefined
+            ? fileObj.lastModified
+            : 'unknown'
+        fileData = {
+          id: fileHash,
+          name: `${fileHash.substring(0, 12)}...${fileHash.substring(fileHash.length - 8)}`, // Show first 12 and last 8 chars
+          size,
+          lastModified,
+          type: 'unknown',
+          fullHash: fileHash, // Store full hash for operations
+        }
       }
-
-      // Fallback for legacy format (file hash strings)
-      const fileHash =
-        typeof fileObj === 'string' ? fileObj : fileObj?.id || fileObj || ''
-      const size =
-        typeof fileObj === 'object' &&
-        fileObj !== null &&
-        'size' in fileObj &&
-        fileObj.size !== undefined
-          ? fileObj.size
-          : 'unknown'
-      const lastModified =
-        typeof fileObj === 'object' &&
-        fileObj !== null &&
-        'lastModified' in fileObj &&
-        fileObj.lastModified !== undefined
-          ? fileObj.lastModified
-          : 'unknown'
-      return {
-        id: fileHash,
-        name: `${fileHash.substring(0, 12)}...${fileHash.substring(fileHash.length - 8)}`, // Show first 12 and last 8 chars
-        size,
-        lastModified,
-        type: 'unknown',
-        fullHash: fileHash, // Store full hash for operations
+      
+      // Only add if we haven't seen this hash before
+      if (!seenHashes.has(fileHash)) {
+        seenHashes.add(fileHash)
+        uniqueFiles.push(fileData)
       }
     })
+    
+    return uniqueFiles
   }, [currentApiDataset])
 
   const [isEditOpen, setIsEditOpen] = useState(false)
@@ -276,6 +292,34 @@ function DatasetView() {
   const [isDragging, setIsDragging] = useState(false)
   const [isDropped, setIsDropped] = useState(false)
   const dropZoneRef = useRef<HTMLDivElement>(null)
+
+  // File processing status tracking with localStorage
+  const [fileProcessingStatus, setFileProcessingStatus] = useState<Record<string, 'processed' | 'failed' | 'skipped'>>({})
+
+  // Load file processing status from localStorage on mount
+  useEffect(() => {
+    if (!activeProject?.namespace || !activeProject?.project || !datasetId) return
+    const key = `llamafarm_file_processing_status_${activeProject.namespace}_${activeProject.project}_${datasetId}`
+    const stored = localStorage.getItem(key)
+    if (stored) {
+      try {
+        setFileProcessingStatus(JSON.parse(stored))
+      } catch (e) {
+        console.error('Failed to parse processing status:', e)
+      }
+    }
+  }, [activeProject?.namespace, activeProject?.project, datasetId])
+
+  // Helper to update file processing status
+  const updateFileStatus = useCallback((updates: Record<string, 'processed' | 'failed' | 'skipped'>) => {
+    if (!activeProject?.namespace || !activeProject?.project || !datasetId) return
+    const key = `llamafarm_file_processing_status_${activeProject.namespace}_${activeProject.project}_${datasetId}`
+    setFileProcessingStatus(prevStatus => {
+      const newStatus = { ...prevStatus, ...updates }
+      localStorage.setItem(key, JSON.stringify(newStatus))
+      return newStatus
+    })
+  }, [activeProject?.namespace, activeProject?.project, datasetId])
 
   // Note: Custom strategies now come from API via project config, not localStorage
 
@@ -456,6 +500,31 @@ function DatasetView() {
       // Task completed successfully
       setCurrentTaskId(null)
 
+      // Update per-file processing status from task result
+      if (taskStatus.result?.details) {
+        const statusUpdates: Record<string, 'processed' | 'failed' | 'skipped'> = {}
+        taskStatus.result.details.forEach((detail: any) => {
+          if (detail.file_hash) {
+            // Determine status based on multiple possible fields
+            let status: 'processed' | 'failed' | 'skipped' = 'processed'
+            
+            // Check for explicit status field
+            if (detail.status === 'skipped' || detail.details?.status === 'skipped') {
+              status = 'skipped'
+            } else if (!detail.success) {
+              status = 'failed'
+            } else if (detail.details?.result?.status === 'skipped') {
+              status = 'skipped'
+            }
+            
+            statusUpdates[detail.file_hash] = status
+          }
+        })
+        if (Object.keys(statusUpdates).length > 0) {
+          updateFileStatus(statusUpdates)
+        }
+      }
+
       // Store the processing result
       if (taskStatus.result) {
         setProcessingResult(taskStatus.result)
@@ -478,7 +547,7 @@ function DatasetView() {
         variant: 'destructive',
       })
     }
-  }, [taskStatus?.state, taskStatus?.error, taskStatus?.result, toast, currentTaskId])
+  }, [taskStatus?.state, taskStatus?.error, taskStatus?.result, toast, currentTaskId, updateFileStatus])
 
   const openEdit = () => {
     setEditName(dataset?.name ?? '')
@@ -608,12 +677,39 @@ function DatasetView() {
   return (
     <div
       ref={dropZoneRef}
-      className={`h-full w-full flex flex-col ${mode === 'designer' ? 'gap-3 pb-40' : ''}`}
+      className={`h-full w-full flex flex-col relative ${mode === 'designer' ? 'gap-3 pb-40' : ''}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {/* Full-tab drag overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 bg-background/95 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+          <div className="flex flex-col items-center justify-center gap-4 text-center p-8 border-2 border-dashed rounded-lg border-primary/50 bg-card/50 max-w-md">
+            <FontIcon
+              type="upload"
+              className="w-16 h-16 text-primary"
+            />
+            <div className="text-2xl font-medium text-foreground">Drop files here</div>
+            <p className="text-sm text-muted-foreground">
+              Upload PDFs, CSVs, or other documents directly to this dataset
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Upload spinner overlay */}
+      {isDropped && !isDragging && (
+        <div className="absolute inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4 text-center p-8">
+            <Loader size={48} />
+            <div className="text-lg font-medium text-foreground">Uploading files...</div>
+            <p className="text-sm text-muted-foreground">Please wait while files are being uploaded</p>
+          </div>
+        </div>
+      )}
+
       {mode === 'designer' ? (
         <div className="flex items-center justify-between mb-3">
           <nav className="text-sm md:text-base flex items-center gap-1.5">
@@ -1522,91 +1618,144 @@ function DatasetView() {
                 />
               </div>
             </div>
-            <div className="rounded-md border border-input bg-background p-0 text-xs">
+            <div className="rounded-md border border-input bg-background overflow-hidden text-xs">
               {files.length === 0 ? (
                 <div className="p-3 text-muted-foreground">
                   No files assigned yet.
                 </div>
               ) : (
                 <div>
-                  <div className="p-3 border-b border-border/60 bg-muted/20">
-                    <div className="text-xs font-medium">
-                      {files.length} file{files.length !== 1 ? 's' : ''}
-                    </div>
+                  {/* Table header */}
+                  <div className="grid grid-cols-12 gap-2 px-3 py-2 border-b border-border/60 bg-muted/20 text-xs font-medium text-muted-foreground">
+                    <div className="col-span-5">Filename</div>
+                    <div className="col-span-3">Status</div>
+                    <div className="col-span-2">Size</div>
+                    <div className="col-span-2 text-right">Actions</div>
                   </div>
+                  
+                  {/* Table rows */}
                   <ul>
                     {files
                       .filter(f =>
                         f.name.toLowerCase().includes(searchValue.toLowerCase())
                       )
-                      .map(f => (
-                        <li
-                          key={f.id}
-                          className="flex items-center justify-between px-3 py-3 border-b last:border-b-0 border-border/60"
-                        >
-                          <div className="font-mono text-xs text-muted-foreground truncate max-w-[60%] flex flex-col gap-1">
-                            <span>{f.fullHash ? f.name : f.name}</span>
-                            {f.fullHash && (
-                              <>
-                                <button
-                                  onClick={async () => {
-                                    try {
-                                      await navigator.clipboard.writeText(
-                                        f.fullHash!
-                                      )
-                                      setCopyStatus(prev => ({
-                                        ...prev,
-                                        [f.id]: 'Copied!',
-                                      }))
-                                    } catch (err) {
-                                      setCopyStatus(prev => ({
-                                        ...prev,
-                                        [f.id]: 'Failed to copy',
-                                      }))
-                                    }
-                                    setTimeout(() => {
-                                      setCopyStatus(prev => ({
-                                        ...prev,
-                                        [f.id]: undefined,
-                                      }))
-                                    }, 1500)
-                                  }}
-                                  className="text-xs text-blue-600 hover:text-blue-800 text-left"
-                                  title="Click to copy full hash"
-                                >
-                                  Copy full hash
-                                </button>
-                                {copyStatus?.[f.id] && (
-                                  <span
-                                    className={`ml-2 text-xs ${copyStatus[f.id] === 'Copied!' ? 'text-green-600' : 'text-red-600'}`}
+                      .map(f => {
+                        const status = f.fullHash ? fileProcessingStatus[f.fullHash] : undefined
+                        
+                        return (
+                          <li
+                            key={f.id}
+                            className="grid grid-cols-12 gap-2 items-center px-3 py-3 border-b last:border-b-0 border-border/60 hover:bg-muted/20"
+                          >
+                            {/* Filename column */}
+                            <div className="col-span-5 flex flex-col gap-1 min-w-0">
+                              <span className="font-mono text-xs text-foreground truncate">
+                                {f.fullHash ? f.name : f.name}
+                              </span>
+                              {f.fullHash && (
+                                <>
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        await navigator.clipboard.writeText(
+                                          f.fullHash!
+                                        )
+                                        setCopyStatus(prev => ({
+                                          ...prev,
+                                          [f.id]: 'Copied!',
+                                        }))
+                                      } catch (err) {
+                                        setCopyStatus(prev => ({
+                                          ...prev,
+                                          [f.id]: 'Failed to copy',
+                                        }))
+                                      }
+                                      setTimeout(() => {
+                                        setCopyStatus(prev => ({
+                                          ...prev,
+                                          [f.id]: undefined,
+                                        }))
+                                      }, 1500)
+                                    }}
+                                    className="text-xs text-blue-600 hover:text-blue-800 text-left"
+                                    title="Click to copy full hash"
                                   >
-                                    {copyStatus[f.id]}
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </div>
-                          <div className="w-1/2 flex items-center justify-between gap-4">
-                            <div className="text-xs text-muted-foreground">
+                                    Copy full hash
+                                  </button>
+                                  {copyStatus?.[f.id] && (
+                                    <span
+                                      className={`text-xs ${copyStatus[f.id] === 'Copied!' ? 'text-green-600' : 'text-red-600'}`}
+                                    >
+                                      {copyStatus[f.id]}
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </div>
+
+                            {/* Status column */}
+                            <div className="col-span-3 flex items-center gap-2">
+                              {status === 'processed' && (
+                                <>
+                                  <FontIcon
+                                    type="checkmark-filled"
+                                    className="w-4 h-4 text-green-600 flex-shrink-0"
+                                  />
+                                  <Badge
+                                    variant="default"
+                                    size="sm"
+                                    className="rounded-xl bg-green-600 text-white"
+                                  >
+                                    Processed
+                                  </Badge>
+                                </>
+                              )}
+                              {status === 'failed' && (
+                                <>
+                                  <FontIcon
+                                    type="close"
+                                    className="w-4 h-4 text-red-600 flex-shrink-0"
+                                  />
+                                  <Badge
+                                    variant="outline"
+                                    size="sm"
+                                    className="rounded-xl border-red-600 text-red-600"
+                                  >
+                                    Failed
+                                  </Badge>
+                                </>
+                              )}
+                              {status === 'skipped' && (
+                                <>
+                                  <div className="w-4 h-4 rounded-full border-2 border-yellow-600 flex items-center justify-center flex-shrink-0">
+                                    <span className="text-yellow-600 text-xs font-bold">!</span>
+                                  </div>
+                                  <Badge
+                                    variant="secondary"
+                                    size="sm"
+                                    className="rounded-xl"
+                                  >
+                                    Skipped
+                                  </Badge>
+                                </>
+                              )}
+                              {!status && (
+                                <>
+                                  <div className="w-4 h-4 rounded-full border-2 border-muted-foreground/30 flex-shrink-0" />
+                                  <span className="text-xs text-muted-foreground">Not processed</span>
+                                </>
+                              )}
+                            </div>
+
+                            {/* Size column */}
+                            <div className="col-span-2 text-xs text-muted-foreground">
                               {f.size === 'unknown' || f.fullHash
                                 ? 'N/A'
                                 : `${Math.ceil(f.size / 1024)} KB`}
                             </div>
-                            <div className="flex items-center gap-6">
-                              {fileUploadStatuses.find(s => s.id === f.id)
-                                ?.status === 'uploading' && (
-                                <div className="flex items-center gap-1 text-muted-foreground">
-                                  <FontIcon type="fade" className="w-4 h-4" />
-                                  <span className="text-xs">Processing</span>
-                                </div>
-                              )}
-                              {fileUploadStatuses.find(s => s.id === f.id)
-                                ?.status === 'success' && (
-                                <FontIcon
-                                  type="checkmark-outline"
-                                  className="w-4 h-4 text-teal-600 dark:text-teal-400"
-                                />
-                              )}
+
+                            {/* Actions column */}
+                            <div className="col-span-2 flex items-center justify-end">
                               <button
                                 className="w-4 h-4 grid place-items-center text-muted-foreground hover:text-red-600 disabled:opacity-50"
                                 onClick={() =>
@@ -1628,9 +1777,9 @@ function DatasetView() {
                                 )}
                               </button>
                             </div>
-                          </div>
-                        </li>
-                      ))}
+                          </li>
+                        )
+                      })}
                   </ul>
                 </div>
               )}
