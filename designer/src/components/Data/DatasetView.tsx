@@ -297,15 +297,20 @@ function DatasetView() {
   const fileProcessingStatus = useMemo(() => {
     const statuses: Record<string, 'processed' | 'failed' | 'skipped'> = {}
     
+    console.log('Current API Dataset:', currentApiDataset)
+    
     // Get status from current dataset's file metadata if available
     if (currentApiDataset?.details?.files_metadata) {
+      console.log('Files metadata:', currentApiDataset.details.files_metadata)
       currentApiDataset.details.files_metadata.forEach((file: any) => {
+        console.log('File metadata:', file)
         if (file.hash && file.processing_status) {
           statuses[file.hash] = file.processing_status
         }
       })
     }
     
+    console.log('Derived file processing statuses:', statuses)
     return statuses
   }, [currentApiDataset])
 
@@ -488,6 +493,10 @@ function DatasetView() {
       // Task completed successfully
       setCurrentTaskId(null)
 
+      console.log('=== PROCESSING COMPLETED ===')
+      console.log('Task Status:', taskStatus)
+      console.log('Task Result:', taskStatus.result)
+      
       // Store the processing result
       if (taskStatus.result) {
         setProcessingResult(taskStatus.result)
@@ -907,6 +916,7 @@ function DatasetView() {
           {/* Processing Results */}
           {processingResult && (
             <section className="rounded-lg border border-border bg-card p-4">
+              {console.log('Processing Result:', processingResult)}
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-medium">Processing Results</h3>
                 <button
@@ -1337,7 +1347,7 @@ function DatasetView() {
                           <div className="w-4 h-4 rounded-full border-2 border-muted-foreground/30 flex-shrink-0" />
                         )}
                         {file.state === 'processing' && (
-                          <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin flex-shrink-0" />
+                          <div className="w-4 h-4 rounded-full border-2 border-blue-900 dark:border-white border-t-transparent animate-spin flex-shrink-0" />
                         )}
                         {file.state === 'success' && (
                           <FontIcon
