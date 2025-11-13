@@ -996,7 +996,8 @@ function DatasetView() {
                           const isHashFilename = displayFilename === fileResult.file_hash || !result.filename
 
                           // Get file extension for icon
-                          const getFileExtension = (filename: string) => {
+                          const getFileExtension = (filename: string | undefined) => {
+                            if (!filename) return ''
                             const parts = filename.split('.')
                             return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : ''
                           }
