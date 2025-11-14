@@ -41,6 +41,7 @@ class RAGHealthCache:
         self.lock = Lock()
         self.background_thread: Thread | None = None
         self.running = False
+        self.consecutive_failures = 0  # Track consecutive health check failures
 
     def start_background_updates(self):
         """Start the background thread that periodically updates health status."""
@@ -73,6 +74,12 @@ class RAGHealthCache:
                     self.cache = health_data
                     self.cache_timestamp = time.time()
 
+                # Reset failure counter on success
+                if health_data and health_data.get("status") in ["healthy", "degraded"]:
+                    self.consecutive_failures = 0
+                else:
+                    self.consecutive_failures += 1
+
                 logger.debug(
                     "RAG health cache updated",
                     extra={
@@ -80,11 +87,23 @@ class RAGHealthCache:
                         if health_data
                         else "failed",
                         "cache_age": 0,
+                        "consecutive_failures": self.consecutive_failures,
                     },
                 )
 
             except Exception as e:
-                logger.warning(f"Background RAG health check failed: {e}")
+                self.consecutive_failures += 1
+                logger.warning(
+                    f"Background RAG health check failed: {e}",
+                    extra={"consecutive_failures": self.consecutive_failures}
+                )
+
+                # Attempt recovery after 3 consecutive failures
+                if self.consecutive_failures >= 3:
+                    logger.info(
+                        f"Attempting recovery after {self.consecutive_failures} consecutive failures"
+                    )
+                    self._attempt_recovery()
 
             # Wait for next update
             for _ in range(self.update_interval):
@@ -174,6 +193,44 @@ class RAGHealthCache:
         except Exception as e:
             logger.warning(f"RAG health check failed: {e}")
             return None
+
+    def _attempt_recovery(self):
+        """
+        Attempt to recover from consecutive health check failures.
+
+        This method clears cached resources that might be causing failures:
+        1. ChromaDB client cache - stale connections can prevent recovery
+        2. Other cached resources as needed
+        """
+        try:
+            # Import here to avoid circular dependencies
+            import sys
+            from pathlib import Path
+
+            # Try to clear ChromaDB client cache
+            try:
+                # Add rag to path if needed
+                rag_path = Path(__file__).parent.parent.parent / "rag"
+                if str(rag_path) not in sys.path:
+                    sys.path.insert(0, str(rag_path))
+
+                from components.stores.chroma_store.chroma_store import ChromaStore
+
+                # Clear the entire client cache
+                ChromaStore.clear_client_cache()
+                logger.info("Cleared ChromaDB client cache for recovery")
+            except ImportError as e:
+                logger.warning(f"Could not import ChromaStore for recovery: {e}")
+            except Exception as e:
+                logger.warning(f"Error clearing ChromaDB client cache: {e}")
+
+            # Reset consecutive failures counter after attempting recovery
+            # This prevents spamming recovery attempts
+            self.consecutive_failures = 0
+            logger.info("Recovery attempt completed")
+
+        except Exception as e:
+            logger.error(f"Recovery attempt failed: {e}", exc_info=True)
 
     def _safe_get_result(self, result, timeout: float, in_task_context: bool):
         """

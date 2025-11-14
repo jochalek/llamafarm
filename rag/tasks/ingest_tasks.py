@@ -88,6 +88,7 @@ def ingest_file_with_rag_task(
         "result": None,
     }
 
+    handler = None
     try:
         # Configuration path
         config_path = Path(project_dir) / "llamafarm.yaml"
@@ -98,7 +99,7 @@ def ingest_file_with_rag_task(
             details["error"] = error_msg
             return False, details
 
-        # Initialize the ingest handler
+        # Initialize the ingest handler with context manager for proper cleanup
         handler = IngestHandler(
             config_path=str(config_path),
             data_processing_strategy=data_processing_strategy_name,
@@ -221,3 +222,13 @@ def ingest_file_with_rag_task(
         )
         details["error"] = str(e)
         return False, details
+    finally:
+        # Always cleanup resources to prevent leaks
+        if handler is not None:
+            try:
+                handler.cleanup()
+            except Exception as cleanup_error:
+                logger.warning(
+                    f"Error during IngestHandler cleanup: {cleanup_error}",
+                    extra={"task_id": self.request.id}
+                )

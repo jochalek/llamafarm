@@ -605,3 +605,33 @@ class IngestHandler:
         results = self.vector_store.search(query_embedding, top_k=top_k)
 
         return results
+
+    def cleanup(self) -> None:
+        """
+        Cleanup resources held by this IngestHandler instance.
+
+        This method should be called when the handler is no longer needed
+        to prevent resource leaks (embedder models, vector store connections, etc.).
+        """
+        # Cleanup embedder resources if it has a cleanup method
+        if hasattr(self, 'embedder') and hasattr(self.embedder, 'cleanup'):
+            try:
+                self.embedder.cleanup()
+            except Exception as e:
+                logger.warning(f"Error cleaning up embedder: {e}")
+
+        # Cleanup vector store resources if it has a cleanup method
+        if hasattr(self, 'vector_store') and hasattr(self.vector_store, 'cleanup'):
+            try:
+                self.vector_store.cleanup()
+            except Exception as e:
+                logger.warning(f"Error cleaning up vector_store: {e}")
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - cleanup resources."""
+        self.cleanup()
+        return False

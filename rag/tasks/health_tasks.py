@@ -276,33 +276,68 @@ def rag_health_check_database_task(
         if database_config:
             try:
                 # Initialize the search API to test database connectivity
-                search_api = DatabaseSearchAPI(
+                # Use context manager to ensure proper cleanup
+                with DatabaseSearchAPI(
                     project_dir=project_dir, database=database
-                )
+                ) as search_api:
+                    # Try to get database stats/info
+                    # This will test if we can actually connect to and query the database
+                    db_stats = search_api.vector_store.get_collection_info()
 
-                # Try to get database stats/info
-                # This will test if we can actually connect to and query the database
-                db_stats = search_api.vector_store.get_collection_info()
+                    if db_stats:
+                        health_data["checks"]["database_connectivity"] = {
+                            "status": "healthy",
+                            "message": f"Database '{database}' is accessible and queryable",
+                        }
 
-                if db_stats:
-                    health_data["checks"]["database_connectivity"] = {
-                        "status": "healthy",
-                        "message": f"Database '{database}' is accessible and queryable",
-                    }
+                        # Add database metrics if available
+                        health_data["metrics"]["document_count"] = db_stats.get("count", 0)
+                        health_data["metrics"]["collection_name"] = db_stats.get(
+                            "name", database
+                        )
+                        if "error" not in db_stats:
+                            health_data["metrics"]["collection_status"] = "active"
 
-                    # Add database metrics if available
-                    health_data["metrics"]["document_count"] = db_stats.get("count", 0)
-                    health_data["metrics"]["collection_name"] = db_stats.get(
-                        "name", database
-                    )
-                    if "error" not in db_stats:
-                        health_data["metrics"]["collection_status"] = "active"
+                        # Check 3: Database query performance test
+                        # Perform this in the same context to reuse the connection
+                        try:
+                            # Perform a simple test query to measure response time
+                            query_start = time.time()
 
-                else:
-                    health_data["checks"]["database_connectivity"] = {
-                        "status": "degraded",
-                        "message": f"Database '{database}' exists but returned no stats",
-                    }
+                            # Use a simple test query
+                            search_api.search(database=database, query="test", top_k=1)
+
+                            query_time_ms = (time.time() - query_start) * 1000
+                            health_data["metrics"]["query_latency_ms"] = round(query_time_ms, 2)
+
+                            if query_time_ms < 1000:  # Less than 1 second
+                                health_data["checks"]["database_performance"] = {
+                                    "status": "healthy",
+                                    "message": f"Query performance good: {query_time_ms:.1f}ms",
+                                }
+                            elif query_time_ms < 5000:  # Less than 5 seconds
+                                health_data["checks"]["database_performance"] = {
+                                    "status": "degraded",
+                                    "message": f"Query performance slow: {query_time_ms:.1f}ms",
+                                }
+                            else:
+                                health_data["checks"]["database_performance"] = {
+                                    "status": "degraded",
+                                    "message": f"Query performance very slow: {query_time_ms:.1f}ms",
+                                }
+
+                        except Exception as e:
+                            health_data["checks"]["database_performance"] = {
+                                "status": "degraded",
+                                "message": f"Performance test failed: {str(e)}",
+                            }
+                            health_data["errors"].append(f"Performance test error: {e}")
+
+                    else:
+                        health_data["checks"]["database_connectivity"] = {
+                            "status": "degraded",
+                            "message": f"Database '{database}' exists but returned no stats",
+                        }
 
             except Exception as e:
                 health_data["checks"]["database_connectivity"] = {
@@ -310,45 +345,6 @@ def rag_health_check_database_task(
                     "message": f"Database connectivity issues: {str(e)}",
                 }
                 health_data["errors"].append(f"Database connection error: {e}")
-
-        # Check 3: Database query performance test
-        if (
-            database_config
-            and health_data["checks"].get("database_connectivity", {}).get("status")
-            == "healthy"
-        ):
-            try:
-                # Perform a simple test query to measure response time
-                query_start = time.time()
-
-                # Use a simple test query
-                search_api.search(database=database, query="test", top_k=1)
-
-                query_time_ms = (time.time() - query_start) * 1000
-                health_data["metrics"]["query_latency_ms"] = round(query_time_ms, 2)
-
-                if query_time_ms < 1000:  # Less than 1 second
-                    health_data["checks"]["database_performance"] = {
-                        "status": "healthy",
-                        "message": f"Query performance good: {query_time_ms:.1f}ms",
-                    }
-                elif query_time_ms < 5000:  # Less than 5 seconds
-                    health_data["checks"]["database_performance"] = {
-                        "status": "degraded",
-                        "message": f"Query performance slow: {query_time_ms:.1f}ms",
-                    }
-                else:
-                    health_data["checks"]["database_performance"] = {
-                        "status": "degraded",
-                        "message": f"Query performance very slow: {query_time_ms:.1f}ms",
-                    }
-
-            except Exception as e:
-                health_data["checks"]["database_performance"] = {
-                    "status": "degraded",
-                    "message": f"Performance test failed: {str(e)}",
-                }
-                health_data["errors"].append(f"Performance test error: {e}")
 
         # Determine overall status based on individual checks
         check_statuses = [check["status"] for check in health_data["checks"].values()]

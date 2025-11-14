@@ -291,6 +291,39 @@ class BaseAPI:
                 f"Failed to initialize components: {e}: rag_config: {self.rag_config}"
             ) from e
 
+    def cleanup(self) -> None:
+        """
+        Cleanup resources held by this API instance.
+
+        This method should be called when the API instance is no longer needed
+        to prevent resource leaks (database connections, embedder models, etc.).
+        """
+        # Cleanup embedder resources if it has a cleanup method
+        if hasattr(self, 'embedder') and hasattr(self.embedder, 'cleanup'):
+            try:
+                self.embedder.cleanup()
+            except Exception as e:
+                # Log but don't raise - best effort cleanup
+                import logging
+                logging.warning(f"Error cleaning up embedder: {e}")
+
+        # Cleanup vector store resources if it has a cleanup method
+        if hasattr(self, 'vector_store') and hasattr(self.vector_store, 'cleanup'):
+            try:
+                self.vector_store.cleanup()
+            except Exception as e:
+                import logging
+                logging.warning(f"Error cleaning up vector_store: {e}")
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - cleanup resources."""
+        self.cleanup()
+        return False
+
 
 class DatabaseSearchAPI(BaseAPI):
     """API for searching directly against a database without dataset requirement."""

@@ -571,6 +571,19 @@ class ChromaStore(VectorStore):
             logger.error(f"Failed to get collection info: {e}")
             return {"error": str(e)}
 
+    def cleanup(self) -> None:
+        """
+        Cleanup resources held by this ChromaStore instance.
+
+        Note: ChromaDB clients are cached at the class level, so this method
+        doesn't close the client directly. Instead, use clear_client_cache()
+        to clear cached clients when needed (e.g., on connection failures).
+        """
+        # ChromaDB clients are managed at class level via _client_cache
+        # Individual instances don't need to close connections
+        # This method is here for compatibility with the Component.cleanup() interface
+        pass
+
     @classmethod
     def get_description(cls) -> str:
         """Get store description."""
