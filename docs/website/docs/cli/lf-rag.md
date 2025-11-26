@@ -13,22 +13,53 @@ Query your knowledge base and access RAG maintenance utilities.
 lf rag query "question" [flags]
 ```
 
+### Basic Flags
+
 | Flag | Purpose |
 | ---- | ------- |
 | `--database` | Select a database (defaults to config default). |
-| `--data-processing-strategy` | Filter results to a strategy. |
-| `--retrieval-strategy` | Override retrieval behaviour (vector, hybrid, metadata filtered, etc.). |
-| `--top-k` | Number of chunks to return. |
-| `--score-threshold` | Minimum similarity score. |
+| `--retrieval-strategy` | Override retrieval strategy (see below). |
+| `--top-k` | Number of chunks to return (default: 5). |
+| `--score-threshold` | Minimum similarity score (0.0-1.0). |
 | `--filter` | Apply metadata filters (`key:value`). Repeatable. |
-| `--include-metadata`, `--include-score` | Show metadata/score columns. |
-| `--distance-metric`, `--hybrid-alpha`, `--rerank-model`, `--query-expansion`, `--max-tokens` | Advanced knobs matching server capabilities. |
+| `--include-metadata` | Show metadata columns in output. |
+| `--include-score` | Show similarity scores in output. |
 
-Example:
+### Advanced Flags
+
+| Flag | Purpose |
+| ---- | ------- |
+| `--distance-metric` | Distance metric: `cosine`, `euclidean`, `manhattan`, `dot`. |
+| `--max-tokens` | Maximum tokens in combined results. |
+
+### Available Retrieval Strategies
+
+| Strategy Name | Description |
+| ------------- | ----------- |
+| `BasicSimilarityStrategy` | Fast vector similarity search |
+| `MetadataFilteredStrategy` | Vector search with metadata filtering |
+| `MultiQueryStrategy` | Query expansion with multiple variations |
+| `HybridUniversalStrategy` | Combines multiple strategies |
+| `CrossEncoderRerankedStrategy` | Two-stage retrieval with cross-encoder reranking |
+| `MultiTurnRAGStrategy` | Query decomposition for complex queries |
+
+### Examples
 
 ```bash
+# Basic query
+lf rag query --database main_db "What is machine learning?"
+
+# With metadata filtering
 lf rag query --database main_db --filter "doc_type:letter" --include-metadata \
   "Which letters mention additional clinical trials?"
+
+# Use a specific retrieval strategy
+lf rag query --database main_db --retrieval-strategy CrossEncoderRerankedStrategy \
+  "What are the key findings?"
+
+# Adjust results
+lf rag query --database main_db --top-k 10 --score-threshold 0.7 \
+  "Summarize the main conclusions"
 ```
 
 ## Maintenance Commands

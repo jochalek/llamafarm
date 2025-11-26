@@ -5,7 +5,315 @@ sidebar_position: 7
 
 # Advanced Retrieval Strategies
 
-LlamaFarm supports advanced retrieval strategies that improve result quality through reranking and query decomposition.
+LlamaFarm supports multiple retrieval strategies that can be combined and configured for different use cases. This guide covers all available strategies from basic to advanced.
+
+## Strategy Overview
+
+| Strategy | Speed | Accuracy | Best For |
+|----------|-------|----------|----------|
+| **BasicSimilarityStrategy** | Very Fast | Medium | Prototyping, simple queries |
+| **MetadataFilteredStrategy** | Fast | Medium | Multi-tenant apps, filtered search |
+| **MultiQueryStrategy** | Medium | High | Ambiguous queries, better recall |
+| **HybridUniversalStrategy** | Medium | High | Balanced precision/recall |
+| **CrossEncoderRerankedStrategy** | Fast | Very High | Production accuracy |
+| **MultiTurnRAGStrategy** | Slow | Very High | Complex multi-part queries |
+
+---
+
+## Basic Similarity Strategy
+
+The simplest and fastest retrieval strategy using pure vector similarity search.
+
+### Overview
+
+**How it works:**
+1. Convert query to embedding vector
+2. Find nearest neighbors using distance metric
+3. Return top-k results
+
+**Performance:**
+- Speed: Very Fast
+- Accuracy: Medium
+- Best for: Prototyping, simple focused questions
+
+### Configuration
+
+```yaml
+rag:
+  databases:
+    - name: main_database
+      retrieval_strategies:
+        - name: basic_search
+          type: BasicSimilarityStrategy
+          config:
+            top_k: 10
+            distance_metric: cosine
+            score_threshold: 0.0
+          default: true
+```
+
+### Configuration Options
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `top_k` | 10 | Number of results to return |
+| `distance_metric` | `cosine` | Distance metric: `cosine`, `euclidean`, `manhattan`, `dot` |
+| `score_threshold` | 0.0 | Minimum similarity score (0-1) |
+
+### Usage
+
+```bash
+# Basic query
+lf rag query --database main_database "What is machine learning?"
+
+# Specify top-k
+lf rag query --database main_database --top-k 5 "What is machine learning?"
+```
+
+---
+
+## Metadata Filtered Strategy
+
+Combines vector search with metadata filtering for targeted retrieval.
+
+### Overview
+
+**How it works:**
+1. Apply metadata filters (pre-filter or post-filter)
+2. Perform vector similarity search on filtered set
+3. Return matching results
+
+**Performance:**
+- Speed: Fast
+- Accuracy: Medium-High (for filtered domains)
+- Best for: Multi-tenant apps, document type filtering, date ranges
+
+### Configuration
+
+```yaml
+rag:
+  databases:
+    - name: main_database
+      retrieval_strategies:
+        - name: filtered_search
+          type: MetadataFilteredStrategy
+          config:
+            top_k: 10
+            filter_mode: pre
+            default_filters: {}
+            fallback_multiplier: 3
+          default: true
+```
+
+### Configuration Options
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `top_k` | 10 | Number of results to return |
+| `filter_mode` | `pre` | When to apply filters: `pre` (before search) or `post` (after search) |
+| `default_filters` | `{}` | Default filters applied to all queries |
+| `fallback_multiplier` | 3 | Multiplier for post-filtering (retrieves N * multiplier, then filters) |
+| `distance_metric` | `cosine` | Distance metric |
+
+### Filter Operators
+
+The strategy supports advanced filter operators:
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| (none) | Exact match | `{"doc_type": "report"}` |
+| `$ne` | Not equal | `{"status": {"$ne": "draft"}}` |
+| `$in` | In list | `{"category": {"$in": ["tech", "science"]}}` |
+| `$nin` | Not in list | `{"status": {"$nin": ["deleted", "archived"]}}` |
+| `$gt` | Greater than | `{"year": {"$gt": 2020}}` |
+| `$gte` | Greater or equal | `{"score": {"$gte": 0.8}}` |
+| `$lt` | Less than | `{"pages": {"$lt": 100}}` |
+| `$lte` | Less or equal | `{"date": {"$lte": "2024-01-01"}}` |
+
+### Usage
+
+```bash
+# Filter by document type
+lf rag query --database main_database --filter "doc_type:report" "quarterly results"
+
+# Multiple filters
+lf rag query --database main_database --filter "year:2024" --filter "category:finance" "revenue growth"
+```
+
+### Example with Default Filters
+
+```yaml
+retrieval_strategies:
+  - name: reports_only
+    type: MetadataFilteredStrategy
+    config:
+      top_k: 10
+      default_filters:
+        doc_type: report
+        status: published
+```
+
+---
+
+## Multi-Query Strategy
+
+Improves recall by generating multiple query variations and aggregating results.
+
+### Overview
+
+**How it works:**
+1. Generate N variations of the original query
+2. Execute vector search for each variation
+3. Aggregate scores using configured method
+4. Return deduplicated top-k results
+
+**Performance:**
+- Speed: Medium (N queries)
+- Accuracy: High (better recall)
+- Best for: Ambiguous queries, synonym handling, comprehensive retrieval
+
+### Configuration
+
+```yaml
+rag:
+  databases:
+    - name: main_database
+      retrieval_strategies:
+        - name: expanded_search
+          type: MultiQueryStrategy
+          config:
+            num_queries: 3
+            aggregation_method: max
+            top_k: 10
+            search_multiplier: 2
+          default: true
+```
+
+### Configuration Options
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `num_queries` | 3 | Number of query variations (1-10) |
+| `aggregation_method` | `max` | Score aggregation: `max`, `mean`, `weighted` |
+| `top_k` | 10 | Results per query variation |
+| `search_multiplier` | 2 | Multiplier for initial retrieval per query |
+| `distance_metric` | `cosine` | Distance metric |
+
+### Aggregation Methods
+
+| Method | Description | Best For |
+|--------|-------------|----------|
+| `max` | Use highest score across all queries | Diverse results, any match is good |
+| `mean` | Average scores across queries | Consistent relevance |
+| `weighted` | Weight scores by query position | Original query priority |
+
+### Usage
+
+```bash
+# Multi-query search
+lf rag query --database main_database --retrieval-strategy expanded_search "machine learning applications"
+```
+
+### How Query Variations Work
+
+The strategy adds metadata to results:
+- `query_frequency`: How many query variations found this document
+- `similarity_score`: Aggregated score from multiple queries
+
+Documents found by multiple query variations are generally more relevant.
+
+---
+
+## Hybrid Universal Strategy
+
+Combines multiple retrieval strategies with configurable weights for balanced results.
+
+### Overview
+
+**How it works:**
+1. Execute multiple sub-strategies in parallel
+2. Collect and normalize scores
+3. Combine using weighted average or rank fusion
+4. Apply optional diversity boost
+5. Return merged top-k results
+
+**Performance:**
+- Speed: Medium (depends on sub-strategies)
+- Accuracy: High (balanced)
+- Best for: Production systems needing precision/recall balance
+
+### Configuration
+
+```yaml
+rag:
+  databases:
+    - name: main_database
+      retrieval_strategies:
+        - name: hybrid_search
+          type: HybridUniversalStrategy
+          config:
+            combination_method: weighted_average
+            normalize_scores: true
+            final_k: 10
+            diversity_boost: 0.1
+            strategies:
+              - type: BasicSimilarityStrategy
+                weight: 0.6
+                config:
+                  top_k: 20
+              - type: MetadataFilteredStrategy
+                weight: 0.4
+                config:
+                  top_k: 20
+          default: true
+```
+
+### Configuration Options
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `strategies` | Required | Array of sub-strategies with weights |
+| `combination_method` | `weighted_average` | How to combine: `weighted_average`, `rank_fusion`, `score_fusion` |
+| `normalize_scores` | `true` | Normalize scores before combining |
+| `final_k` | 10 | Final number of results |
+| `diversity_boost` | 0.0 | Reduce scores for similar content (0-1) |
+
+### Sub-Strategy Configuration
+
+Each sub-strategy entry:
+
+```yaml
+strategies:
+  - type: BasicSimilarityStrategy  # Strategy class name
+    weight: 0.6                     # Weight for this strategy (0-1)
+    config:                         # Strategy-specific config
+      top_k: 20
+```
+
+### Available Sub-Strategies
+
+| Type | Alias |
+|------|-------|
+| `BasicSimilarityStrategy` | `basic` |
+| `MetadataFilteredStrategy` | `filtered` |
+| `MultiQueryStrategy` | `multi_query` |
+
+### Combination Methods
+
+| Method | Description |
+|--------|-------------|
+| `weighted_average` | Weighted sum of normalized scores |
+| `rank_fusion` | Reciprocal Rank Fusion (RRF) with k=60 |
+| `score_fusion` | Direct score combination |
+
+### Usage
+
+```bash
+# Hybrid search
+lf rag query --database main_database --retrieval-strategy hybrid_search "comprehensive question"
+```
+
+---
 
 ## Cross-Encoder Reranking
 

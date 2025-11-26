@@ -45,9 +45,10 @@ rag:
             model: nomic-embed-text:latest
       retrieval_strategies:
         - name: semantic_search
-          type: VectorRetriever
+          type: BasicSimilarityStrategy
           config:
             top_k: 5
+            distance_metric: cosine
   data_processing_strategies:
     - name: pdf_ingest
       parsers:
@@ -159,6 +160,9 @@ rag:
   databases:
     - name: compliance_db
       type: QdrantStore
+      config:
+        vector_size: 1536
+        distance: Cosine
       default_embedding_strategy: openai_embeddings
       default_retrieval_strategy: hybrid_search
       embedding_strategies:
@@ -170,8 +174,13 @@ rag:
         - name: hybrid_search
           type: HybridUniversalStrategy
           config:
-            dense_weight: 0.7
-            sparse_weight: 0.3
+            combination_method: weighted_average
+            final_k: 10
+            strategies:
+              - type: BasicSimilarityStrategy
+                weight: 0.7
+              - type: MetadataFilteredStrategy
+                weight: 0.3
   data_processing_strategies:
     - name: docx_ingest
       parsers:
@@ -182,12 +191,32 @@ rag:
       extractors:
         - type: EntityExtractor
           config:
-            include_types: [ORGANIZATION, LAW]
+            entity_types: [ORG, LAW, PERSON, DATE]
 ```
 
 ## Multi-Strategy Retrieval
 
+This example shows multiple retrieval strategies for different use cases:
+
 ```yaml
+runtime:
+  default_model: default
+  models:
+    - name: default
+      provider: ollama
+      model: llama3:8b
+      default: true
+    # Reranker model for CrossEncoderRerankedStrategy
+    - name: reranker
+      provider: universal
+      model: cross-encoder/ms-marco-MiniLM-L-6-v2
+      base_url: http://127.0.0.1:11540
+    # Query decomposition model for MultiTurnRAGStrategy
+    - name: decomposer
+      provider: ollama
+      model: gemma3:1b
+      base_url: http://localhost:11434/v1
+
 rag:
   databases:
     - name: research_db
@@ -198,17 +227,43 @@ rag:
         - name: dense_embeddings
           type: SentenceTransformerEmbedder
           config:
-            model: all-MiniLM-L6-v2
+            model_name: sentence-transformers/all-MiniLM-L6-v2
       retrieval_strategies:
-        - name: keyword_search
-          type: BM25Retriever
+        # Fast basic search
+        - name: basic_search
+          type: BasicSimilarityStrategy
           config:
-            stop_words: ["the", "a", "and"]
+            top_k: 10
+            distance_metric: cosine
+        # Filtered search with metadata
+        - name: filtered_search
+          type: MetadataFilteredStrategy
+          config:
+            top_k: 10
+            filter_mode: pre
+        # Multi-query expansion for better recall
+        - name: expanded_search
+          type: MultiQueryStrategy
+          config:
+            num_queries: 3
+            aggregation_method: max
+            top_k: 10
+        # Reranked search for high accuracy
         - name: reranked_search
-          type: RerankedStrategy
+          type: CrossEncoderRerankedStrategy
           config:
-            candidate_strategy: keyword_search
-            reranker: bm25+embedding
+            model_name: reranker
+            initial_k: 30
+            final_k: 10
+            base_strategy: BasicSimilarityStrategy
+        # Complex query handling
+        - name: complex_search
+          type: MultiTurnRAGStrategy
+          config:
+            model_name: decomposer
+            max_sub_queries: 3
+            complexity_threshold: 50
+            final_top_k: 10
 ```
 
 ## Mixed Providers (Ollama + Lemonade)

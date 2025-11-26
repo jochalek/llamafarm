@@ -143,9 +143,10 @@ rag:
             model: nomic-embed-text:latest
       retrieval_strategies:
         - name: semantic_search
-          type: VectorRetriever
+          type: BasicSimilarityStrategy
           config:
             top_k: 5
+            distance_metric: cosine
   data_processing_strategies:
     - name: pdf_ingest
       parsers:
@@ -160,8 +161,9 @@ rag:
 
 Key points:
 
-- `databases` map to vector stores; choose from `ChromaStore` or `QdrantStore` by default.
-- `embedding_strategies` and `retrieval_strategies` let you define hybrid or metadata-aware search.
+- `databases` map to vector stores; choose from `ChromaStore`, `QdrantStore`, `FAISSStore`, or `PineconeStore`.
+- `embedding_strategies` define embedders: `OllamaEmbedder`, `UniversalEmbedder`, `OpenAIEmbedder`, `HuggingFaceEmbedder`, `SentenceTransformerEmbedder`.
+- `retrieval_strategies` define search behavior: `BasicSimilarityStrategy`, `MetadataFilteredStrategy`, `MultiQueryStrategy`, `HybridUniversalStrategy`, `CrossEncoderRerankedStrategy`, `MultiTurnRAGStrategy`.
 - `data_processing_strategies` describe parser/extractor pipelines applied during ingestion.
 - For a complete field reference, see the [RAG Guide](../rag/index.md).
 

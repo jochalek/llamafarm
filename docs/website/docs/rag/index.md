@@ -35,17 +35,29 @@ rag:
             model: nomic-embed-text:latest
       retrieval_strategies:
         - name: semantic_search
-          type: VectorRetriever
+          type: BasicSimilarityStrategy
           config:
             top_k: 5
+            distance_metric: cosine
         - name: hybrid_search
           type: HybridUniversalStrategy
           config:
-            dense_weight: 0.6
-            sparse_weight: 0.4
+            combination_method: weighted_average
+            final_k: 10
 ```
 
-- Add multiple strategies for different workloads (semantic, keyword, reranked).
+**Available Retrieval Strategy Types:**
+
+| Strategy | Description | Best For |
+|----------|-------------|----------|
+| `BasicSimilarityStrategy` | Fast vector similarity search | Simple queries, prototyping |
+| `MetadataFilteredStrategy` | Vector search with metadata filtering | Multi-tenant, filtered search |
+| `MultiQueryStrategy` | Expands query into variations | Ambiguous queries, better recall |
+| `HybridUniversalStrategy` | Combines multiple strategies | Balanced precision/recall |
+| `CrossEncoderRerankedStrategy` | Two-stage retrieval with reranking | High accuracy requirements |
+| `MultiTurnRAGStrategy` | Query decomposition for complex questions | Complex multi-part queries |
+
+- Add multiple strategies for different workloads (semantic, filtered, reranked).
 - Set `default_*` fields to control CLI defaults.
 - Extend store/types by editing `rag/schema.yaml` and following the [Extending guide](../extending/index.md#extend-rag-components).
 
@@ -67,9 +79,46 @@ rag:
       extractors:
         - type: HeadingExtractor
         - type: ContentStatisticsExtractor
-      metadata_extractors:
         - type: EntityExtractor
+          config:
+            entity_types: [PERSON, ORG, GPE, DATE]
 ```
+
+**Available Parser Types:**
+
+| Parser | File Types | Description |
+|--------|------------|-------------|
+| `PDFParser_PyPDF2` | `.pdf` | Enhanced PDF parsing with PyPDF2 |
+| `PDFParser_LlamaIndex` | `.pdf` | Advanced PDF with multiple fallback strategies |
+| `CSVParser_Pandas` | `.csv` | CSV with Pandas data analysis |
+| `CSVParser_Python` | `.csv` | Simple native Python CSV parsing |
+| `ExcelParser_OpenPyXL` | `.xlsx`, `.xls` | Excel with formula support |
+| `ExcelParser_Pandas` | `.xlsx`, `.xls` | Excel with data analysis |
+| `DocxParser_PythonDocx` | `.docx` | Word document parsing |
+| `DocxParser_LlamaIndex` | `.docx` | Advanced DOCX with semantic chunking |
+| `MarkdownParser_Python` | `.md` | Markdown with regex parsing |
+| `MarkdownParser_LlamaIndex` | `.md` | Advanced markdown with semantic chunking |
+| `TextParser_Python` | `.txt` | Text with encoding detection |
+| `TextParser_LlamaIndex` | `.txt` | Advanced text with semantic splitting |
+| `MsgParser_ExtractMsg` | `.msg` | Outlook email message parsing |
+
+**Available Extractor Types:**
+
+| Extractor | Description |
+|-----------|-------------|
+| `HeadingExtractor` | Extract document headings and hierarchy |
+| `ContentStatisticsExtractor` | Calculate readability, vocabulary, structure metrics |
+| `EntityExtractor` | Extract named entities (people, organizations, dates) |
+| `KeywordExtractor` | Extract keywords using RAKE, YAKE, or TF-IDF |
+| `DateTimeExtractor` | Extract and normalize dates and times |
+| `LinkExtractor` | Extract URLs, emails, and domains |
+| `PathExtractor` | Extract file paths and S3 paths |
+| `PatternExtractor` | Extract patterns (emails, phones, IPs, credit cards) |
+| `SummaryExtractor` | Generate extractive summaries |
+| `TableExtractor` | Extract and parse tables |
+| `YAKEExtractor` | YAKE keyword extraction |
+| `RAKEExtractor` | RAKE keyword extraction |
+| `TFIDFExtractor` | TF-IDF keyword extraction |
 
 - Parsers handle format-aware chunking (PDF, CSV, DOCX, Markdown, text).
 - Extractors add metadata (entities, headings, statistics) to each chunk.

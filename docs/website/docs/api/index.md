@@ -840,14 +840,24 @@ Perform a semantic search query against a RAG database.
 - `query` (required): The search query text
 - `database` (optional): Database name (uses default if not specified)
 - `top_k` (optional): Number of results to return (default: 5)
-- `score_threshold` (optional): Minimum similarity score
-- `retrieval_strategy` (optional): Strategy to use for retrieval
-- `metadata_filters` (optional): Filter results by metadata
-- `distance_metric` (optional): Distance metric to use
-- `hybrid_alpha` (optional): Alpha parameter for hybrid search
-- `rerank_model` (optional): Model to use for reranking
-- `query_expansion` (optional): Enable query expansion
-- `max_tokens` (optional): Maximum tokens in results
+- `score_threshold` (optional): Minimum similarity score (0.0-1.0)
+- `retrieval_strategy` (optional): Strategy name defined in config (see below)
+- `metadata_filters` (optional): Filter results by metadata (object with key-value pairs)
+- `distance_metric` (optional): Distance metric: `cosine`, `euclidean`, `manhattan`, `dot`
+- `max_tokens` (optional): Maximum tokens in combined results
+
+**Available Retrieval Strategies:**
+
+| Strategy | Description |
+|----------|-------------|
+| `BasicSimilarityStrategy` | Fast vector similarity search |
+| `MetadataFilteredStrategy` | Vector search with metadata filtering |
+| `MultiQueryStrategy` | Query expansion with multiple variations |
+| `HybridUniversalStrategy` | Combines multiple strategies |
+| `CrossEncoderRerankedStrategy` | Two-stage retrieval with cross-encoder reranking |
+| `MultiTurnRAGStrategy` | Query decomposition for complex queries |
+
+The `retrieval_strategy` parameter should match a strategy name defined in your `llamafarm.yaml` database configuration.
 
 **Response:**
 ```json

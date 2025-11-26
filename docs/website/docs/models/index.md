@@ -296,6 +296,48 @@ rag:
             batch_size: 16
 ```
 
+**Example 3: RAG with Cross-Encoder Reranking**
+
+Universal Runtime supports cross-encoder models for the `CrossEncoderRerankedStrategy`:
+
+```yaml
+runtime:
+  default_model: chat
+  models:
+    - name: chat
+      provider: ollama
+      model: llama3:8b
+      default: true
+
+    # Cross-encoder for reranking (used by CrossEncoderRerankedStrategy)
+    - name: reranker
+      provider: universal
+      model: cross-encoder/ms-marco-MiniLM-L-6-v2
+      base_url: http://127.0.0.1:11540
+
+rag:
+  databases:
+    - name: main_database
+      type: ChromaStore
+      retrieval_strategies:
+        - name: reranked_search
+          type: CrossEncoderRerankedStrategy
+          config:
+            model_name: reranker  # References runtime.models
+            initial_k: 30
+            final_k: 10
+            base_strategy: BasicSimilarityStrategy
+          default: true
+```
+
+**Recommended Reranking Models:**
+
+| Model | Size | Speed | Languages | Best For |
+|-------|------|-------|-----------|----------|
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` | ~90MB | Very Fast | English | Default choice |
+| `BAAI/bge-reranker-v2-m3` | ~560MB | Medium | 100+ | Multilingual, high accuracy |
+| `BAAI/bge-reranker-base` | ~280MB | Fast | 100+ | Good balance |
+
 ### Hardware Acceleration
 
 Universal Runtime automatically detects and optimizes for your hardware:
