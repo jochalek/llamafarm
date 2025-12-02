@@ -1206,7 +1206,7 @@ export function TestChatMessage({
                 {openThinking && (
                   <div className="px-3 py-2 text-sm border-t border-border">
                     {thinkingFromTags ? (
-                      <div className="prose prose-sm dark:prose-invert max-w-none leading-normal prose-p:my-4 prose-li:my-0.5 prose-ul:my-3 prose-ol:my-3 prose-headings:my-4 prose-pre:my-3">
+                      <div className="prose prose-sm dark:prose-invert max-w-none leading-normal break-words prose-p:my-4 prose-li:my-0.5 prose-ul:my-3 prose-ol:my-3 prose-headings:my-4 prose-pre:my-3">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {thinkingFromTags.replace(/\n{3,}/g, '\n\n')}
                         </ReactMarkdown>
@@ -1233,7 +1233,7 @@ export function TestChatMessage({
             )}
 
             {/* Final answer content (without <think> … </think>) */}
-            <div className="prose prose-sm dark:prose-invert max-w-none leading-relaxed prose-p:my-4 prose-li:my-1 prose-ul:my-4 prose-ol:my-4 prose-headings:my-4 prose-pre:my-3 [&>*]:mb-4">
+            <div className="prose prose-sm dark:prose-invert max-w-none leading-relaxed break-words prose-p:my-4 prose-li:my-1 prose-ul:my-4 prose-ol:my-4 prose-headings:my-4 prose-pre:my-3 [&>*]:mb-4">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {contentWithoutThinking.replace(/\n{3,}/g, '\n\n')}
               </ReactMarkdown>
