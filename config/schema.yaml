@@ -80,6 +80,12 @@ properties:
         database:
           type: string
           description: RAG database to use for the dataset
+        files:
+          type: array
+          description: List of file hashes (SHA256 hashes tracked by the server)
+          items:
+            type: string
+          default: []
     default: []
 
   runtime:
