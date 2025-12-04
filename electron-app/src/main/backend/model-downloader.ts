@@ -80,22 +80,26 @@ export interface ModelDownloadProgress {
 
 export class ModelDownloader {
   private config: RequiredModelsConfig | null = null
-  private configPath: string
+  private _configPath: string | null = null
   private serverUrl: string
+
+  private get configPath(): string {
+    if (!this._configPath) {
+      const possiblePaths = [
+        path.join(__dirname, '../../required-models.yaml'),
+        path.join(__dirname, '../../../required-models.yaml'),
+        path.join(app.getAppPath(), 'required-models.yaml'),
+        path.join(process.cwd(), 'required-models.yaml')
+      ]
+      this._configPath = possiblePaths.find(p => fs.existsSync(p)) || possiblePaths[0]
+    }
+    return this._configPath
+  }
 
   constructor(serverUrl?: string) {
     // Server URL for direct API communication
     this.serverUrl = serverUrl || DEFAULT_SERVER_URL
-
-    // Config file location - check multiple paths
-    const possiblePaths = [
-      path.join(__dirname, '../../required-models.yaml'),
-      path.join(__dirname, '../../../required-models.yaml'),
-      path.join(app.getAppPath(), 'required-models.yaml'),
-      path.join(process.cwd(), 'required-models.yaml')
-    ]
-
-    this.configPath = possiblePaths.find(p => fs.existsSync(p)) || possiblePaths[0]
+    // Config path will be initialized lazily
   }
 
   /**

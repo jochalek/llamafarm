@@ -22,12 +22,22 @@ export interface InstallProgress {
 export class CLIInstaller {
   private readonly REPO = 'llama-farm/llamafarm'
   private readonly BINARY_NAME = 'lf'
-  private cliPath: string
+  private _cliPath: string | null = null
+
+  private get cliPath(): string {
+    if (!this._cliPath) {
+      const userDataPath = app.getPath('userData')
+      this._cliPath = path.join(userDataPath, 'bin', this.BINARY_NAME)
+    }
+    return this._cliPath
+  }
+
+  private set cliPath(value: string) {
+    this._cliPath = value
+  }
 
   constructor() {
-    // Store CLI in app's userData directory for portable installation
-    const userDataPath = app.getPath('userData')
-    this.cliPath = path.join(userDataPath, 'bin', this.BINARY_NAME)
+    // Path will be initialized lazily when first accessed
   }
 
   /**

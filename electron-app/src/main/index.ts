@@ -17,10 +17,6 @@ import axios from 'axios'
 
 const execAsync = promisify(exec)
 
-// Configure auto-updater
-autoUpdater.autoDownload = true
-autoUpdater.autoInstallOnAppQuit = true
-
 class LlamaFarmApp {
   private cliInstaller: CLIInstaller
   private modelDownloader: ModelDownloader
@@ -29,30 +25,16 @@ class LlamaFarmApp {
   private isQuitting = false
 
   constructor() {
-    // Set app name early
-    app.setName('LlamaFarm')
-
-    // Force dark mode for title bar to match Designer UI
-    nativeTheme.themeSource = 'dark'
-
-    // Set dock icon on macOS (in development)
-    if (process.platform === 'darwin' && !app.isPackaged) {
-      try {
-        const iconPath = path.join(__dirname, '../../../designer/public/llama-farm-favicon.svg')
-        if (fs.existsSync(iconPath)) {
-          const icon = nativeImage.createFromPath(iconPath)
-          app.dock?.setIcon(icon)
-        }
-      } catch (error) {
-        console.log('Could not set dock icon:', error)
-      }
-    }
-
     this.cliInstaller = new CLIInstaller()
     this.modelDownloader = new ModelDownloader()
     this.windowManager = new WindowManager()
     this.menuManager = new MenuManager()
+  }
 
+  /**
+   * Initialize event handlers - called after app is ready
+   */
+  public initialize(): void {
     this.setupEventHandlers()
     this.setupIPCHandlers()
     this.setupAutoUpdater()
@@ -62,6 +44,10 @@ class LlamaFarmApp {
    * Setup auto-updater
    */
   private setupAutoUpdater(): void {
+    // Configure auto-updater
+    autoUpdater.autoDownload = true
+    autoUpdater.autoInstallOnAppQuit = true
+
     // Only check for updates in production
     if (!app.isPackaged) {
       console.log('Skipping auto-update check in development mode')
@@ -141,6 +127,10 @@ class LlamaFarmApp {
    */
   private async onReady(): Promise<void> {
     console.log('LlamaFarm starting...')
+
+    // Set app name and theme
+    app.setName('LlamaFarm')
+    nativeTheme.themeSource = 'dark'
 
     // Create application menu
     this.menuManager.createMenu()
@@ -495,5 +485,10 @@ class LlamaFarmApp {
   }
 }
 
-// Create and start the app
-new LlamaFarmApp()
+// Create app instance
+const llamaFarmApp = new LlamaFarmApp()
+
+// Initialize after app is ready
+app.whenReady().then(() => {
+  llamaFarmApp.initialize()
+})
