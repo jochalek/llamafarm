@@ -5,6 +5,9 @@ A FastAPI server that provides OpenAI-compatible endpoints for any HuggingFace
 model without restrictions. Supports:
 - Text generation (Causal LMs: GPT, Llama, Mistral, etc.)
 - Text embeddings & classification (Encoders: BERT, sentence-transformers, etc.)
+- Vision tasks (Object detection, segmentation, classification, pose estimation)
+- Realtime vision via WebSocket (single images, video frames, RTSP streams)
+- Face recognition (detection, verification, analysis with DeepFace)
 
 Key Features:
 - Auto-detects hardware (MPS/CUDA/CPU)
@@ -41,6 +44,11 @@ from models import (
     LanguageModel,
 )
 from routers.chat_completions import router as chat_completions_router
+from routers.face import router as face_router
+from routers.realtime import router as realtime_router
+from routers.transcription import router as transcription_router
+from routers.vision import router as vision_router
+from routers.vision import websocket_router as vision_websocket_router
 from utils.device import get_device_info, get_optimal_device
 from utils.model_format import detect_model_format
 
@@ -99,6 +107,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(chat_completions_router)
+app.include_router(realtime_router)
+app.include_router(transcription_router)
+app.include_router(vision_router)
+app.include_router(vision_websocket_router)
+app.include_router(face_router)
 
 # Global model cache
 _models: dict[str, BaseModel] = {}

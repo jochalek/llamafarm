@@ -90,6 +90,9 @@ def llama_farm_api() -> fastapi.FastAPI:
     app.include_router(routers.examples_router, prefix=API_PREFIX)
     app.include_router(routers.event_logs_router, prefix=API_PREFIX)
     app.include_router(routers.models_router, prefix=API_PREFIX)
+    app.include_router(routers.vision_router, prefix=API_PREFIX)
+    # Realtime WebSocket router (includes /v1 in its route path)
+    app.include_router(routers.realtime_router)
     # Health endpoints are exposed at the root (no version prefix)
     app.include_router(routers.health_router)
 

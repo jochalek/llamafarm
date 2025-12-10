@@ -8,6 +8,7 @@ Tasks are organized by functionality:
 - delete_tasks: File deletion from vector stores
 - query_tasks: Complex RAG query operations
 - health_tasks: Health monitoring and diagnostics
+- vision_tasks: Vision model training and export
 """
 
 from .delete_tasks import delete_file_task
@@ -16,6 +17,7 @@ from .ingest_tasks import ingest_file_with_rag_task
 from .query_tasks import handle_rag_query_task
 from .search_tasks import search_with_rag_database_task
 from .stats_tasks import rag_get_database_stats_task
+from .vision_tasks import export_model_task, train_vision_model_task
 
 __all__ = [
     "search_with_rag_database_task",
@@ -25,4 +27,6 @@ __all__ = [
     "rag_health_check_task",
     "rag_ping_task",
     "rag_get_database_stats_task",
+    "train_vision_model_task",
+    "export_model_task",
 ]

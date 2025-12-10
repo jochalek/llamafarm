@@ -86,7 +86,10 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Models & Runtime',
       link: { type: 'doc', id: 'models/index' },
-      items: [],
+      items: [
+        { type: 'doc', id: 'models/realtime-api', label: 'Realtime Chat API' },
+        { type: 'doc', id: 'models/realtime-transcription', label: 'Realtime Transcription API' },
+      ],
     },
     {
       type: 'category',

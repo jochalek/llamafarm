@@ -89,6 +89,10 @@ properties:
         type: string
         description: Name of the default model to use (references a model name in the models list). If not specified, uses first model.
 
+      default_transcription_model:
+        type: string
+        description: Name of the default transcription model to use (references a model with type=transcription)
+
       models:
         type: array
         description: List of model configurations for multi-model support
@@ -102,6 +106,13 @@ properties:
             name:
               type: string
               description: Model identifier (unique name)
+            type:
+              type: string
+              enum: [chat, transcription, tts, embedding]
+              default: chat
+              description: |
+                Model type: chat (LLM, default), transcription (STT/Whisper),
+                tts (text-to-speech), embedding (vector embeddings)
             description:
               type: string
               description: Human-readable description of this model configuration
@@ -171,6 +182,51 @@ properties:
               items:
                 $ref: "#/definitions/Tool"
               default: []
+
+            # Transcription-specific settings (type=transcription)
+            language:
+              type: string
+              default: en
+              description: ISO-639-1 language code for transcription (en, es, fr, de, etc.) or null for auto-detect
+            commit_interval_ms:
+              type: integer
+              default: 1500
+              minimum: 500
+              maximum: 10000
+              description: How often to commit audio for transcription (ms). Lower = faster but less context.
+            vad:
+              type: object
+              description: Voice Activity Detection configuration (for type=transcription)
+              properties:
+                enabled:
+                  type: boolean
+                  default: true
+                  description: Enable server-side VAD
+                threshold:
+                  type: number
+                  default: 0.5
+                  minimum: 0.0
+                  maximum: 1.0
+                  description: VAD sensitivity (0-1). Higher = less sensitive.
+                silence_duration_ms:
+                  type: integer
+                  default: 800
+                  minimum: 100
+                  maximum: 5000
+                  description: Silence duration to end speech segment (ms)
+                prefix_padding_ms:
+                  type: integer
+                  default: 300
+                  minimum: 0
+                  maximum: 2000
+                  description: Audio to include before speech detection (ms)
+            hallucination_filter:
+              type: boolean
+              default: true
+              description: Filter repetitive Whisper hallucinations (for type=transcription)
+            chain_to_model:
+              type: string
+              description: Model name to forward transcriptions to (for voice chat pipelines)
 
   mcp:
     type: object

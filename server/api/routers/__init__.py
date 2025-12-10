@@ -5,7 +5,9 @@ from .health import router as health_router
 from .models import router as models_router
 from .projects import router as projects_router
 from .rag import router as rag_router
+from .realtime import router as realtime_router
 from .system import disk_router, upgrades_router
+from .vision import router as vision_router
 
 __all__ = [
     "projects_router",
@@ -17,4 +19,6 @@ __all__ = [
     "examples_router",
     "event_logs_router",
     "models_router",
+    "realtime_router",
+    "vision_router",
 ]
